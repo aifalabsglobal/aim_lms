@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
+import GraphRequestProgressBar from "./GraphRequestProgressBar";
 
 type CreatedMeeting = {
   id: string;
@@ -97,6 +98,7 @@ export default function CreateMeetingForm() {
         onSubmit={onSubmit}
         className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6"
       >
+        <GraphRequestProgressBar active={isSubmitting} label="Creating meeting via Microsoft Graph..." />
         <h2 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">
           Create Teams Training Meeting
         </h2>

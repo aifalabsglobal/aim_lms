@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import GraphRequestProgressBar from "./GraphRequestProgressBar";
 
 type EditableMeeting = {
   id: string;
@@ -87,6 +88,7 @@ export default function EditMeetingForm({ meeting }: { meeting: EditableMeeting 
       onSubmit={onSubmit}
       className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03] lg:p-6"
     >
+      <GraphRequestProgressBar active={isSubmitting} label="Updating meeting in Microsoft Graph..." />
       <h2 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white/90">
         Edit Teams Meeting
       </h2>

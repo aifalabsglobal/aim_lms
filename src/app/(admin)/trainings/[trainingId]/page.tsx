@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { fetchTrainingDetails } from "@/lib/graph";
 import TrainingCardActions from "@/components/trainings/TrainingCardActions";
+import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 
 export const dynamic = "force-dynamic";
 
@@ -60,12 +60,12 @@ export default async function TrainingDetailPage({
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <TrainingCardActions trainingId={details.training.id} />
-            <Link
+            <ProgressNavLink
               href="/trainings"
               className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >
               Back to Trainings
-            </Link>
+            </ProgressNavLink>
           </div>
         </div>
 
@@ -94,14 +94,14 @@ export default async function TrainingDetailPage({
                         {formatDate(recording.endDateTime)}
                       </p>
                     </div>
-                    <Link
+                    <ProgressNavLink
                       href={`/trainings/${encodeURIComponent(
                         details.training.id,
                       )}/recordings/${encodeURIComponent(recording.id)}`}
                       className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-medium text-white hover:bg-brand-600"
                     >
                       Open Recording
-                    </Link>
+                    </ProgressNavLink>
                   </div>
                 ))}
               </div>

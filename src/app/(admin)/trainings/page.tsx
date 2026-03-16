@@ -2,6 +2,7 @@ import React from "react";
 import Link from "next/link";
 import { fetchTeamsTrainings } from "@/lib/graph";
 import TrainingCardActions from "@/components/trainings/TrainingCardActions";
+import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 9;
@@ -224,12 +225,12 @@ export default async function TrainingsPage({
               </dl>
 
               <div className="mt-5 flex flex-wrap gap-2">
-                <Link
+                <ProgressNavLink
                   href={`/trainings/${encodeURIComponent(training.id)}`}
                   className="inline-flex items-center rounded-lg border border-brand-300 px-3 py-2 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:border-brand-500/40 dark:text-brand-300 dark:hover:bg-brand-500/10"
                 >
                   View Details
-                </Link>
+                </ProgressNavLink>
                 {training.joinUrl && (
                   <a
                     href={training.joinUrl}
@@ -260,7 +261,7 @@ export default async function TrainingsPage({
 
       {!loadError && totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
-          <Link
+          <ProgressNavLink
             href={buildTrainingsUrl(currentPage - 1, query)}
             className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium ${
               currentPage === 1
@@ -269,11 +270,11 @@ export default async function TrainingsPage({
             }`}
           >
             Previous
-          </Link>
+          </ProgressNavLink>
           <span className="text-sm text-gray-500 dark:text-gray-400">
             Page {currentPage} of {totalPages}
           </span>
-          <Link
+          <ProgressNavLink
             href={buildTrainingsUrl(currentPage + 1, query)}
             className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium ${
               currentPage === totalPages
@@ -282,7 +283,7 @@ export default async function TrainingsPage({
             }`}
           >
             Next
-          </Link>
+          </ProgressNavLink>
         </div>
       )}
     </div>

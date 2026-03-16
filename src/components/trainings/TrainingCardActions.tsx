@@ -1,8 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import React, { useState } from "react";
+import ProgressNavLink from "./ProgressNavLink";
+import GraphRequestProgressBar from "./GraphRequestProgressBar";
 
 type Props = {
   trainingId: string;
@@ -46,12 +47,12 @@ export default function TrainingCardActions({ trainingId }: Props) {
 
   return (
     <>
-      <Link
+      <ProgressNavLink
         href={`/trainings/${encodeURIComponent(trainingId)}/edit`}
         className="inline-flex items-center rounded-lg border border-warning-300 px-3 py-2 text-xs font-medium text-warning-700 hover:bg-warning-50 dark:border-warning-500/40 dark:text-warning-300 dark:hover:bg-warning-500/10"
       >
         Edit
-      </Link>
+      </ProgressNavLink>
       <button
         type="button"
         onClick={handleDelete}
@@ -60,6 +61,11 @@ export default function TrainingCardActions({ trainingId }: Props) {
       >
         {isDeleting ? "Deleting..." : "Delete"}
       </button>
+      <GraphRequestProgressBar
+        active={isDeleting}
+        label="Deleting meeting from Microsoft Graph..."
+        className="basis-full"
+      />
       {error && (
         <span className="text-xs text-error-600 dark:text-error-400">{error}</span>
       )}

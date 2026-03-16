@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(cuid())
+  clerkUserId String?      @unique @map("clerkId")
+  email       String?
+  name        String?
+  imageUrl    String?      @map("image")
+  status      String       @default("active")
+  role        Role?        @default(STUDENT)
+  courses     Course[]     @relation("TutorCourses")
+  enrollments Enrollment[] @relation("StudentEnrollments")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Course {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  duration    String?
+  isCompliance Boolean?
+  isPublished Boolean?
+  tutorId     String?
+  tutor       User?        @relation("TutorCourses", fields: [tutorId], references: [id], onDelete: Restrict)
+  classes     Class[]
+  enrollments Enrollment[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime?    @updatedAt
+}
+
+enum Role {
+  ADMIN
+  TRAINER
+  COORDINATOR
+  STUDENT
+  TUTOR
+  STAFF
+  SUPER_ADMIN
+}
+
+model Enrollment {
+  id        String   @id @default(cuid())
+  studentId String
+  courseId  String
+  status    String   @default("active")
+  student   User     @relation("StudentEnrollments", fields: [studentId], references: [id], onDelete: Cascade)
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, courseId])
+}
+
+model Class {
+  id           String    @id @default(cuid())
+  courseId     String
+  startTime    DateTime
+  meetingUrl   String?
+  recordingUrl String?
+  course       Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+}
+
+model ClerkWebhookEvent {
+  id        String   @id @default(cuid())
+  svixId    String   @unique
+  eventType String
+  status    String   @default("processed")
+  createdAt DateTime @default(now())
+}

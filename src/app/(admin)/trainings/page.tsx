@@ -1,9 +1,11 @@
 import React from "react";
 import Link from "next/link";
 import { fetchTeamsTrainings } from "@/lib/graph";
+import TrainingCardActions from "@/components/trainings/TrainingCardActions";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 9;
+const LAST_MONTHS_WINDOW = 4;
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
@@ -44,29 +46,20 @@ function parsePage(value: string): number {
   return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
 }
 
-function parseDate(value: string, endOfDay = false): Date | null {
-  if (!value) {
-    return null;
-  }
-  const date = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}`);
-  return Number.isNaN(date.getTime()) ? null : date;
+function getLastMonthsBoundary(monthsBack: number): Date {
+  const boundary = new Date();
+  boundary.setHours(0, 0, 0, 0);
+  boundary.setMonth(boundary.getMonth() - monthsBack);
+  return boundary;
 }
 
 function buildTrainingsUrl(
   page: number,
   query: string,
-  fromDate: string,
-  toDate: string,
 ): string {
   const params = new URLSearchParams();
   if (query) {
     params.set("q", query);
-  }
-  if (fromDate) {
-    params.set("from", fromDate);
-  }
-  if (toDate) {
-    params.set("to", toDate);
   }
   if (page > 1) {
     params.set("page", String(page));
@@ -82,8 +75,6 @@ export default async function TrainingsPage({
 }) {
   const resolvedSearchParams = await searchParams;
   const query = getQueryValue(resolvedSearchParams, "q").trim();
-  const fromDate = getQueryValue(resolvedSearchParams, "from").trim();
-  const toDate = getQueryValue(resolvedSearchParams, "to").trim();
   const requestedPage = parsePage(getQueryValue(resolvedSearchParams, "page"));
 
   let trainings = [] as Awaited<ReturnType<typeof fetchTeamsTrainings>>;
@@ -97,8 +88,7 @@ export default async function TrainingsPage({
   }
 
   const queryLower = query.toLowerCase();
-  const fromBoundary = parseDate(fromDate, false);
-  const toBoundary = parseDate(toDate, true);
+  const fromBoundary = getLastMonthsBoundary(LAST_MONTHS_WINDOW);
 
   const filteredTrainings = trainings.filter((training) => {
     const searchable = [
@@ -113,10 +103,6 @@ export default async function TrainingsPage({
       return false;
     }
 
-    if (!fromBoundary && !toBoundary) {
-      return true;
-    }
-
     if (!training.startDateTime) {
       return false;
     }
@@ -125,10 +111,7 @@ export default async function TrainingsPage({
     if (Number.isNaN(start.getTime())) {
       return false;
     }
-    if (fromBoundary && start < fromBoundary) {
-      return false;
-    }
-    if (toBoundary && start > toBoundary) {
+    if (start < fromBoundary) {
       return false;
     }
 
@@ -151,7 +134,7 @@ export default async function TrainingsPage({
           All Trainings
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Teams trainings retrieved live from Microsoft Graph API.
+          Teams trainings from the last {LAST_MONTHS_WINDOW} months.
         </p>
       </div>
 
@@ -160,24 +143,12 @@ export default async function TrainingsPage({
         method="get"
         className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"
       >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <input
             type="text"
             name="q"
             defaultValue={query}
             placeholder="Search by title or organizer"
-            className="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
-          />
-          <input
-            type="date"
-            name="from"
-            defaultValue={fromDate}
-            className="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
-          />
-          <input
-            type="date"
-            name="to"
-            defaultValue={toDate}
             className="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
           />
           <div className="flex gap-2">
@@ -279,6 +250,7 @@ export default async function TrainingsPage({
                     View Event
                   </a>
                 )}
+                <TrainingCardActions trainingId={training.id} />
               </div>
             </div>
             ))}
@@ -289,7 +261,7 @@ export default async function TrainingsPage({
       {!loadError && totalPages > 1 && (
         <div className="flex items-center justify-end gap-2">
           <Link
-            href={buildTrainingsUrl(currentPage - 1, query, fromDate, toDate)}
+            href={buildTrainingsUrl(currentPage - 1, query)}
             className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium ${
               currentPage === 1
                 ? "pointer-events-none border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600"
@@ -302,7 +274,7 @@ export default async function TrainingsPage({
             Page {currentPage} of {totalPages}
           </span>
           <Link
-            href={buildTrainingsUrl(currentPage + 1, query, fromDate, toDate)}
+            href={buildTrainingsUrl(currentPage + 1, query)}
             className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium ${
               currentPage === totalPages
                 ? "pointer-events-none border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600"

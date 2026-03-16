@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { fetchTrainingDetails } from "@/lib/graph";
+import TrainingCardActions from "@/components/trainings/TrainingCardActions";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +49,7 @@ export default async function TrainingDetailPage({
 
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
               {details.training.title}
@@ -57,12 +58,15 @@ export default async function TrainingDetailPage({
               Training details, past recordings, and meeting participants.
             </p>
           </div>
-          <Link
-            href="/trainings"
-            className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-          >
-            Back to Trainings
-          </Link>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <TrainingCardActions trainingId={details.training.id} />
+            <Link
+              href="/trainings"
+              className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              Back to Trainings
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

@@ -9,6 +9,11 @@ type GraphDateTime = {
   timeZone?: string;
 };
 
+type GraphItemBody = {
+  contentType?: string;
+  content?: string;
+};
+
 type GraphOrganizer = {
   emailAddress?: {
     name?: string;
@@ -31,6 +36,7 @@ type GraphAttendee = {
 type GraphEvent = {
   id?: string;
   subject?: string;
+  body?: GraphItemBody;
   start?: GraphDateTime;
   end?: GraphDateTime;
   webLink?: string;
@@ -43,11 +49,13 @@ type GraphEvent = {
 
 type GraphEventsResponse = {
   value?: GraphEvent[];
+  "@odata.nextLink"?: string;
 };
 
 type GraphEventCreateResponse = {
   id?: string;
   subject?: string;
+  body?: GraphItemBody;
   webLink?: string;
   onlineMeetingUrl?: string;
   start?: GraphDateTime;
@@ -116,6 +124,26 @@ export type CreateMeetingResult = {
   ownerUserId: string;
   startDateTime: string | null;
   endDateTime: string | null;
+};
+
+export type EditMeetingDetails = {
+  id: string;
+  title: string;
+  description: string;
+  startDateTime: string;
+  endDateTime: string;
+  timeZone: string;
+  ownerUserId: string;
+};
+
+export type UpdateMeetingInput = {
+  meetingId: string;
+  title: string;
+  description?: string;
+  startDateTime: string;
+  endDateTime: string;
+  timeZone?: string;
+  ownerUserId?: string;
 };
 
 export type TrainingDiagnostics = {
@@ -357,6 +385,22 @@ async function graphPatchNoContent(
   }
 }
 
+async function graphDeleteNoContent(token: string, url: string): Promise<void> {
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Prefer: 'outlook.timezone="UTC"',
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Graph request failed: ${response.status} ${text}`);
+  }
+}
+
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
@@ -496,13 +540,34 @@ async function fetchTrainingEvents(): Promise<GraphEvent[]> {
   const { mailbox } = getGraphContext();
   const select =
     "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting";
-  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+  let nextUrl: string | null = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
     mailbox,
   )}/events?$top=100&$orderby=start/dateTime desc&$select=${encodeURIComponent(
     select,
   )}`;
-  const data = await graphGet<GraphEventsResponse>(token, url);
-  return data.value ?? [];
+  const allEvents: GraphEvent[] = [];
+  const seenEventIds = new Set<string>();
+  let pageCount = 0;
+  const maxPages = 30;
+
+  while (nextUrl && pageCount < maxPages) {
+    const page: GraphEventsResponse = await graphGet<GraphEventsResponse>(token, nextUrl);
+    for (const event of page.value ?? []) {
+      const eventId = event.id?.trim();
+      if (eventId) {
+        if (seenEventIds.has(eventId)) {
+          continue;
+        }
+        seenEventIds.add(eventId);
+      }
+      allEvents.push(event);
+    }
+
+    nextUrl = page["@odata.nextLink"] ?? null;
+    pageCount += 1;
+  }
+
+  return allEvents;
 }
 
 async function resolveOnlineMeetingId(
@@ -1142,6 +1207,120 @@ export async function createTeamsMeeting(
   };
 }
 
+export async function fetchMeetingForEdit(meetingId: string): Promise<EditMeetingDetails> {
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const event = await graphGet<GraphEventCreateResponse>(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/events/${encodeURIComponent(
+      meetingId,
+    )}?$select=id,subject,body,start,end,webLink,onlineMeetingUrl`,
+  );
+
+  const startDateTime = event.start?.dateTime?.trim();
+  const endDateTime = event.end?.dateTime?.trim();
+  if (!event.id || !startDateTime || !endDateTime) {
+    throw new Error("Meeting payload is incomplete");
+  }
+
+  return {
+    id: event.id,
+    title: event.subject?.trim() || "Untitled Meeting",
+    description: htmlToText(event.body?.content),
+    startDateTime,
+    endDateTime,
+    timeZone: event.start?.timeZone || event.end?.timeZone || "Asia/Kolkata",
+    ownerUserId,
+  };
+}
+
+export async function updateTeamsMeeting(
+  input: UpdateMeetingInput,
+): Promise<CreateMeetingResult> {
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = input.ownerUserId?.trim() || getTargetMailbox();
+  const description = input.description?.trim() || "Training session updated via AIM LMS.";
+
+  const existing = await graphGet<GraphEventCreateResponse>(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/events/${encodeURIComponent(
+      input.meetingId,
+    )}?$select=id,subject,start,end,webLink,onlineMeetingUrl`,
+  );
+
+  const bodyHtml = buildMeetingInviteBodyHtml({
+    title: input.title.trim(),
+    description,
+    startDateTime: input.startDateTime,
+    endDateTime: input.endDateTime,
+    joinUrl: existing.onlineMeetingUrl ?? null,
+    eventUrl: existing.webLink ?? null,
+  });
+
+  await graphPatchNoContent(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/events/${encodeURIComponent(input.meetingId)}?sendUpdates=all`,
+    {
+      subject: input.title.trim(),
+      body: {
+        contentType: "HTML",
+        content: bodyHtml,
+      },
+      start: {
+        dateTime: input.startDateTime,
+        timeZone: input.timeZone?.trim() || "Asia/Kolkata",
+      },
+      end: {
+        dateTime: input.endDateTime,
+        timeZone: input.timeZone?.trim() || "Asia/Kolkata",
+      },
+    },
+  );
+
+  const updated = await graphGet<GraphEventCreateResponse>(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/events/${encodeURIComponent(
+      input.meetingId,
+    )}?$select=id,subject,start,end,webLink,onlineMeetingUrl`,
+  );
+
+  if (!updated.id) {
+    throw new Error("Meeting update returned an empty event id");
+  }
+
+  return {
+    id: updated.id,
+    title: updated.subject?.trim() || input.title.trim(),
+    joinUrl: updated.onlineMeetingUrl ?? null,
+    eventUrl: updated.webLink ?? null,
+    ownerUserId,
+    startDateTime: updated.start?.dateTime ?? null,
+    endDateTime: updated.end?.dateTime ?? null,
+  };
+}
+
+export async function deleteTeamsMeeting(
+  meetingId: string,
+  ownerUserId?: string,
+): Promise<void> {
+  const token = await getMicrosoftGraphAccessToken();
+  const owner = ownerUserId?.trim() || getTargetMailbox();
+  await graphDeleteNoContent(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      owner,
+    )}/events/${encodeURIComponent(meetingId)}?sendUpdates=all`,
+  );
+}
+
 function formatForIst(value: string | null): string {
   if (!value) return "TBD";
   const date = new Date(value);
@@ -1155,6 +1334,22 @@ function formatForIst(value: string | null): string {
     hour12: true,
     timeZone: "Asia/Kolkata",
   }).format(date);
+}
+
+function htmlToText(html: string | undefined): string {
+  if (!html) {
+    return "";
+  }
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function buildMeetingInviteBodyHtml(input: {

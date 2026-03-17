@@ -10,39 +10,51 @@ export async function getCurrentAppUser() {
     return null;
   }
 
+  const clerkUser = await currentUser();
+  const clerkEmail = clerkUser?.emailAddresses[0]?.emailAddress ?? null;
+  const clerkName = clerkUser
+    ? [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ").trim() || null
+    : null;
+  const clerkImageUrl = clerkUser?.imageUrl ?? null;
+
   const existingUser = await prisma.user.findUnique({
     where: { clerkUserId: userId },
   });
   if (existingUser) {
-    const shouldBeAdmin = isAdminEmail(existingUser.email);
-    if (shouldBeAdmin && existingUser.role !== "ADMIN") {
+    const normalizedExistingEmail = existingUser.email?.trim().toLowerCase() ?? null;
+    const normalizedClerkEmail = clerkEmail?.trim().toLowerCase() ?? null;
+    const emailOutOfSync = normalizedExistingEmail !== normalizedClerkEmail;
+    const missingProfileFields = !existingUser.name || !existingUser.imageUrl;
+    const shouldBeAdmin = isAdminEmail(clerkEmail ?? existingUser.email);
+    const needsRoleUpdate = shouldBeAdmin && existingUser.role !== "ADMIN";
+
+    if (emailOutOfSync || missingProfileFields || needsRoleUpdate) {
       return prisma.user.update({
         where: { id: existingUser.id },
-        data: { role: "ADMIN" },
+        data: {
+          email: clerkEmail,
+          name: clerkName ?? existingUser.name,
+          imageUrl: clerkImageUrl ?? existingUser.imageUrl,
+          role: shouldBeAdmin ? "ADMIN" : existingUser.role ?? "STUDENT",
+        },
       });
     }
     return existingUser;
   }
 
   // Webhook delivery can lag; this keeps auth usable on first login.
-  const clerkUser = await currentUser();
   if (!clerkUser) {
     return null;
   }
 
-  const email = clerkUser.emailAddresses[0]?.emailAddress ?? null;
-  const fullName = [clerkUser.firstName, clerkUser.lastName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  const role = isAdminEmail(email) ? "ADMIN" : "STUDENT";
+  const role = isAdminEmail(clerkEmail) ? "ADMIN" : "STUDENT";
 
   return prisma.user.create({
     data: {
       clerkUserId: clerkUser.id,
-      email,
-      name: fullName || null,
-      imageUrl: clerkUser.imageUrl ?? null,
+      email: clerkEmail,
+      name: clerkName,
+      imageUrl: clerkImageUrl,
       role,
       status: "active",
     },

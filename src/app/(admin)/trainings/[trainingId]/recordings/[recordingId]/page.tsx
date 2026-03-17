@@ -6,6 +6,7 @@ import {
 } from "@/lib/streamAccess";
 import { auth } from "@clerk/nextjs/server";
 import { headers } from "next/headers";
+import { requireAppUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,7 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
   const decodedTrainingId = decodeURIComponent(trainingId);
   const decodedRecordingId = decodeURIComponent(recordingId);
   const { userId, sessionId } = await auth();
+  const appUser = await requireAppUser();
 
   try {
     if (!userId || !sessionId) {
@@ -58,6 +60,10 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
     const details = await fetchTrainingRecordingDetails(
       decodedTrainingId,
       decodedRecordingId,
+      {
+        email: appUser?.email ?? null,
+        role: appUser?.role ?? null,
+      },
     );
     const expiresAt = Date.now() + 5 * 60 * 1000;
     const clientFingerprint = createClientFingerprintFromHeaders(requestHeaders);
@@ -198,9 +204,15 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
       </div>
     );
   } catch (error) {
+    const message =
+      error instanceof Error && error.message.toLowerCase() === "forbidden"
+        ? "You do not have access to this recording."
+        : error instanceof Error
+        ? error.message
+        : "Failed to load recording";
     return (
       <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
-        {error instanceof Error ? error.message : "Failed to load recording"}
+        {message}
       </div>
     );
   }

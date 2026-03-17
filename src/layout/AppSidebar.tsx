@@ -15,6 +15,8 @@ import {
   UserCircleIcon,
 } from "../icons/index";
 
+type AppRole = "admin" | "super_admin" | "student" | "trainer" | "coordinator" | "staff" | "tutor" | null;
+
 type NavItem = {
   name: string;
   icon: React.ReactNode;
@@ -91,9 +93,19 @@ const othersItems: NavItem[] = [
   },
 ];
 
+const learnerNavItems: NavItem[] = [
+  {
+    name: "Trainings",
+    icon: <ListIcon />,
+    subItems: [{ name: "My Trainings", path: "/trainings", pro: false }],
+  },
+];
+const noNavItems: NavItem[] = [];
+
 const AppSidebar: React.FC = () => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
+  const [role, setRole] = useState<AppRole>(null);
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -229,15 +241,41 @@ const AppSidebar: React.FC = () => {
     {}
   );
   const subMenuRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const canManageAllFeatures = role === "admin" || role === "super_admin";
+  const activeMainItems = canManageAllFeatures ? navItems : learnerNavItems;
+  const activeOtherItems = canManageAllFeatures ? othersItems : noNavItems;
 
   // const isActive = (path: string) => path === pathname;
    const isActive = useCallback((path: string) => path === pathname, [pathname]);
 
   useEffect(() => {
+    let isMounted = true;
+    async function loadRole() {
+      try {
+        const response = await fetch("/api/me", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { role?: string | null };
+        if (isMounted) {
+          const incomingRole = data.role?.toLowerCase() ?? null;
+          setRole((incomingRole as AppRole) ?? null);
+        }
+      } catch {
+        // keep default restricted nav when role can't be fetched
+      }
+    }
+    loadRole();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     // Check if the current path matches any submenu item
     let submenuMatched = false;
     ["main", "others"].forEach((menuType) => {
-      const items = menuType === "main" ? navItems : othersItems;
+      const items = menuType === "main" ? activeMainItems : activeOtherItems;
       items.forEach((nav, index) => {
         if (nav.subItems) {
           nav.subItems.forEach((subItem) => {
@@ -257,7 +295,7 @@ const AppSidebar: React.FC = () => {
     if (!submenuMatched) {
       setOpenSubmenu(null);
     }
-  }, [pathname,isActive]);
+  }, [pathname, isActive, activeMainItems, activeOtherItems]);
 
   useEffect(() => {
     // Set the height of the submenu items when the submenu is opened
@@ -345,25 +383,27 @@ const AppSidebar: React.FC = () => {
                   <HorizontaLDots />
                 )}
               </h2>
-              {renderMenuItems(navItems, "main")}
+              {renderMenuItems(activeMainItems, "main")}
             </div>
 
-            <div className="">
-              <h2
-                className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
-                  !isExpanded && !isHovered
-                    ? "lg:justify-center"
-                    : "justify-start"
-                }`}
-              >
-                {isExpanded || isHovered || isMobileOpen ? (
-                  "Others"
-                ) : (
-                  <HorizontaLDots />
-                )}
-              </h2>
-              {renderMenuItems(othersItems, "others")}
-            </div>
+            {activeOtherItems.length > 0 && (
+              <div className="">
+                <h2
+                  className={`mb-4 text-xs uppercase flex leading-[20px] text-gray-400 ${
+                    !isExpanded && !isHovered
+                      ? "lg:justify-center"
+                      : "justify-start"
+                  }`}
+                >
+                  {isExpanded || isHovered || isMobileOpen ? (
+                    "Others"
+                  ) : (
+                    <HorizontaLDots />
+                  )}
+                </h2>
+                {renderMenuItems(activeOtherItems, "others")}
+              </div>
+            )}
           </div>
         </nav>
       </div>

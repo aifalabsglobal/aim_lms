@@ -11,6 +11,7 @@ type EditableMeeting = {
   startDateTime: string;
   endDateTime: string;
   timeZone: string;
+  attendeeEmails: string[];
 };
 
 function toLocalDateTimeInputValue(value: string): string {
@@ -39,6 +40,7 @@ export default function EditMeetingForm({ meeting }: { meeting: EditableMeeting 
   const [startDateTime, setStartDateTime] = useState(defaultStart);
   const [endDateTime, setEndDateTime] = useState(defaultEnd);
   const [timeZone, setTimeZone] = useState(meeting.timeZone || "Asia/Kolkata");
+  const [attendees, setAttendees] = useState((meeting.attendeeEmails ?? []).join(", "));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -50,6 +52,11 @@ export default function EditMeetingForm({ meeting }: { meeting: EditableMeeting 
     setIsSubmitting(true);
 
     try {
+      const attendeeEmails = attendees
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
       const response = await fetch(
         `/api/admin/trainings/meetings/${encodeURIComponent(meeting.id)}`,
         {
@@ -61,6 +68,7 @@ export default function EditMeetingForm({ meeting }: { meeting: EditableMeeting 
             startDateTime,
             endDateTime,
             timeZone,
+            attendeeEmails,
           }),
         },
       );
@@ -140,6 +148,20 @@ export default function EditMeetingForm({ meeting }: { meeting: EditableMeeting 
             onChange={(e) => setTimeZone(e.target.value)}
             className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
           />
+        </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-sm text-gray-700 dark:text-gray-300">
+            Eligible attendee emails (comma separated)
+          </label>
+          <input
+            value={attendees}
+            onChange={(e) => setAttendees(e.target.value)}
+            className="h-11 w-full rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
+            placeholder="user1@org.com, user2@org.com"
+          />
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Only these attendees (plus organizers/admins) will be eligible to view this training.
+          </p>
         </div>
       </div>
 

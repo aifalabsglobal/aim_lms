@@ -1,6 +1,7 @@
 import { fetchTrainingDetails } from "@/lib/graph";
 import TrainingCardActions from "@/components/trainings/TrainingCardActions";
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
+import { requireAppUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -43,9 +44,15 @@ export default async function TrainingDetailPage({
 }: TrainingDetailPageProps) {
   const { trainingId } = await params;
   const decodedTrainingId = decodeURIComponent(trainingId);
+  const appUser = await requireAppUser();
+  const role = appUser?.role?.toLowerCase() ?? null;
+  const canManageTrainings = role === "admin" || role === "super_admin";
 
   try {
-    const details = await fetchTrainingDetails(decodedTrainingId);
+    const details = await fetchTrainingDetails(decodedTrainingId, {
+      email: appUser?.email ?? null,
+      role: appUser?.role ?? null,
+    });
 
     return (
       <div className="space-y-6">
@@ -59,7 +66,7 @@ export default async function TrainingDetailPage({
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <TrainingCardActions trainingId={details.training.id} />
+            {canManageTrainings && <TrainingCardActions trainingId={details.training.id} />}
             <ProgressNavLink
               href="/trainings"
               className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
@@ -166,9 +173,15 @@ export default async function TrainingDetailPage({
       </div>
     );
   } catch (error) {
+    const message =
+      error instanceof Error && error.message.toLowerCase() === "forbidden"
+        ? "You do not have access to this training."
+        : error instanceof Error
+        ? error.message
+        : "Failed to load training details";
     return (
       <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
-        {error instanceof Error ? error.message : "Failed to load training details"}
+        {message}
       </div>
     );
   }

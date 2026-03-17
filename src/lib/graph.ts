@@ -106,6 +106,11 @@ export type TrainingRecordingDetails = {
   diagnostics: TrainingDiagnostics;
 };
 
+export type TrainingViewerContext = {
+  email: string | null;
+  role: string | null;
+};
+
 export type CreateMeetingInput = {
   title: string;
   description?: string;
@@ -133,6 +138,7 @@ export type EditMeetingDetails = {
   startDateTime: string;
   endDateTime: string;
   timeZone: string;
+  attendeeEmails: string[];
   ownerUserId: string;
 };
 
@@ -143,6 +149,7 @@ export type UpdateMeetingInput = {
   startDateTime: string;
   endDateTime: string;
   timeZone?: string;
+  attendeeEmails?: string[];
   ownerUserId?: string;
 };
 
@@ -504,6 +511,37 @@ function mapParticipantsFromEvent(event: GraphEvent): TrainingParticipant[] {
   }
 
   return participants;
+}
+
+function isPrivilegedRole(role: string | null): boolean {
+  const normalized = (role ?? "").trim().toLowerCase();
+  return normalized === "admin" || normalized === "super_admin";
+}
+
+function canViewerAccessEvent(
+  viewer: TrainingViewerContext | undefined,
+  event: GraphEvent,
+): boolean {
+  if (!viewer) {
+    return false;
+  }
+  if (isPrivilegedRole(viewer.role)) {
+    return true;
+  }
+
+  const email = viewer.email?.trim().toLowerCase();
+  if (!email) {
+    return false;
+  }
+
+  const organizerEmail = event.organizer?.emailAddress?.address?.trim().toLowerCase();
+  if (organizerEmail === email) {
+    return true;
+  }
+
+  return (event.attendees ?? []).some(
+    (attendee) => attendee.emailAddress?.address?.trim().toLowerCase() === email,
+  );
 }
 
 function isPastEvent(event: GraphEvent): boolean {
@@ -1010,14 +1048,20 @@ async function fetchParticipantsFromCallRecords(
   }
 }
 
-export async function fetchTeamsTrainings(): Promise<TrainingCardItem[]> {
+export async function fetchTeamsTrainings(
+  viewer?: TrainingViewerContext,
+): Promise<TrainingCardItem[]> {
+  const needsAttendees = !isPrivilegedRole(viewer?.role ?? null);
   const events = await fetchTrainingEvents({
     startFromIso: getIsoMonthsAgo(4),
     maxPages: 6,
     top: 100,
-    select: "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer",
+    select: needsAttendees
+      ? "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees"
+      : "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer",
   });
   return events
+    .filter((event) => canViewerAccessEvent(viewer, event))
     .filter((event) => event.isOnlineMeeting || Boolean(event.onlineMeetingUrl))
     .map(mapEventToTraining)
     .filter((event): event is TrainingCardItem => Boolean(event));
@@ -1025,6 +1069,7 @@ export async function fetchTeamsTrainings(): Promise<TrainingCardItem[]> {
 
 export async function fetchTrainingDetails(
   trainingId: string,
+  viewer?: TrainingViewerContext,
 ): Promise<TrainingDetails> {
   const token = await getMicrosoftGraphAccessToken();
   const { mailbox } = getGraphContext();
@@ -1032,6 +1077,9 @@ export async function fetchTrainingDetails(
 
   if (!trainingEvent) {
     throw new Error("Training not found");
+  }
+  if (!canViewerAccessEvent(viewer, trainingEvent)) {
+    throw new Error("Forbidden");
   }
 
   const training = mapEventToTraining(trainingEvent);
@@ -1093,7 +1141,7 @@ export async function fetchTrainingDetails(
       .filter((event) => {
         const sameSubject =
           (event.subject ?? "").trim().toLowerCase() === normalizedSubject;
-        return sameSubject && isPastEvent(event);
+        return sameSubject && isPastEvent(event) && canViewerAccessEvent(viewer, event);
       })
       .map(mapEventToRecording)
       .filter((event): event is TrainingRecordingItem => Boolean(event))
@@ -1190,8 +1238,9 @@ export async function fetchTrainingDetails(
 export async function fetchTrainingRecordingDetails(
   trainingId: string,
   recordingId: string,
+  viewer?: TrainingViewerContext,
 ): Promise<TrainingRecordingDetails> {
-  const details = await fetchTrainingDetails(trainingId);
+  const details = await fetchTrainingDetails(trainingId, viewer);
   const recording = details.recordings.find((item) => item.id === recordingId);
   if (!recording) {
     throw new Error("Recording not found");
@@ -1297,13 +1346,13 @@ export async function createTeamsMeeting(
 export async function fetchMeetingForEdit(meetingId: string): Promise<EditMeetingDetails> {
   const token = await getMicrosoftGraphAccessToken();
   const ownerUserId = getTargetMailbox();
-  const event = await graphGet<GraphEventCreateResponse>(
+  const event = await graphGet<GraphEvent>(
     token,
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
       ownerUserId,
     )}/events/${encodeURIComponent(
       meetingId,
-    )}?$select=id,subject,body,start,end,webLink,onlineMeetingUrl`,
+    )}?$select=id,subject,body,start,end,webLink,onlineMeetingUrl,attendees`,
   );
 
   const startDateTime = event.start?.dateTime?.trim();
@@ -1319,6 +1368,9 @@ export async function fetchMeetingForEdit(meetingId: string): Promise<EditMeetin
     startDateTime,
     endDateTime,
     timeZone: event.start?.timeZone || event.end?.timeZone || "Asia/Kolkata",
+    attendeeEmails: uniqueNonEmpty(
+      (event.attendees ?? []).map((attendee) => attendee.emailAddress?.address ?? null),
+    ),
     ownerUserId,
   };
 }
@@ -1348,6 +1400,8 @@ export async function updateTeamsMeeting(
     eventUrl: existing.webLink ?? null,
   });
 
+  const attendeeEmails = uniqueNonEmpty(input.attendeeEmails ?? []);
+
   await graphPatchNoContent(
     token,
     `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
@@ -1367,6 +1421,10 @@ export async function updateTeamsMeeting(
         dateTime: input.endDateTime,
         timeZone: input.timeZone?.trim() || "Asia/Kolkata",
       },
+      attendees: attendeeEmails.map((email) => ({
+        emailAddress: { address: email },
+        type: "required",
+      })),
     },
   );
 

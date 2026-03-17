@@ -34,6 +34,7 @@ export default async function EditTrainingMeetingPage({ params }: PageProps) {
         startDateTime: string;
         endDateTime: string;
         timeZone: string;
+        attendeeEmails: string[];
       }
     | null = null;
 

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { fetchTeamsTrainings } from "@/lib/graph";
 import TrainingCardActions from "@/components/trainings/TrainingCardActions";
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
+import { requireAppUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 9;
@@ -77,12 +78,18 @@ export default async function TrainingsPage({
   const resolvedSearchParams = await searchParams;
   const query = getQueryValue(resolvedSearchParams, "q").trim();
   const requestedPage = parsePage(getQueryValue(resolvedSearchParams, "page"));
+  const appUser = await requireAppUser();
+  const role = appUser?.role?.toLowerCase() ?? null;
+  const canManageTrainings = role === "admin" || role === "super_admin";
 
   let trainings = [] as Awaited<ReturnType<typeof fetchTeamsTrainings>>;
   let loadError: string | null = null;
 
   try {
-    trainings = await fetchTeamsTrainings();
+    trainings = await fetchTeamsTrainings({
+      email: appUser?.email ?? null,
+      role: appUser?.role ?? null,
+    });
   } catch (error) {
     loadError =
       error instanceof Error ? error.message : "Failed to load trainings";
@@ -132,10 +139,12 @@ export default async function TrainingsPage({
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
-          All Trainings
+          {canManageTrainings ? "All Trainings" : "My Trainings"}
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          Teams trainings from the last {LAST_MONTHS_WINDOW} months.
+          {canManageTrainings
+            ? `Teams trainings from the last ${LAST_MONTHS_WINDOW} months.`
+            : `Trainings assigned to you from the last ${LAST_MONTHS_WINDOW} months.`}
         </p>
       </div>
 
@@ -251,7 +260,7 @@ export default async function TrainingsPage({
                     View Event
                   </a>
                 )}
-                <TrainingCardActions trainingId={training.id} />
+                {canManageTrainings && <TrainingCardActions trainingId={training.id} />}
               </div>
             </div>
             ))}

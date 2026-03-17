@@ -4,7 +4,8 @@ import { useSidebar } from "@/context/SidebarContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
-import React from "react";
+import { usePathname, useRouter } from "next/navigation";
+import React, { useEffect, useState } from "react";
 
 export default function AdminLayout({
   children,
@@ -12,6 +13,9 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const { isExpanded, isHovered, isMobileOpen } = useSidebar();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [role, setRole] = useState<string | null>(null);
 
   // Dynamic class for main content margin based on sidebar state
   const mainContentMargin = isMobileOpen
@@ -19,6 +23,35 @@ export default function AdminLayout({
     : isExpanded || isHovered
     ? "lg:ml-[290px]"
     : "lg:ml-[90px]";
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadRole() {
+      try {
+        const response = await fetch("/api/me", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as { role?: string | null };
+        if (isMounted) {
+          setRole(data.role?.toLowerCase() ?? null);
+        }
+      } catch {
+        // no-op
+      }
+    }
+    loadRole();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const isAdmin = role === "admin" || role === "super_admin";
+    if (role && !isAdmin && !pathname.startsWith("/trainings")) {
+      router.replace("/trainings");
+    }
+  }, [role, pathname, router]);
 
   return (
     <div className="min-h-screen xl:flex">

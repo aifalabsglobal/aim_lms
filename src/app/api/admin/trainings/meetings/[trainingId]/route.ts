@@ -8,6 +8,7 @@ type UpdateMeetingRequest = {
   startDateTime?: string;
   endDateTime?: string;
   timeZone?: string;
+  attendeeEmails?: string[];
   ownerUserId?: string;
 };
 
@@ -57,6 +58,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       startDateTime: body.startDateTime,
       endDateTime: body.endDateTime,
       timeZone: body.timeZone || "Asia/Kolkata",
+      attendeeEmails: body.attendeeEmails ?? [],
       ownerUserId: body.ownerUserId,
     });
 

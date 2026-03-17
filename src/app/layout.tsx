@@ -4,7 +4,9 @@ import './globals.css';
 import "flatpickr/dist/flatpickr.css";
 import { SidebarProvider } from '@/context/SidebarContext';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { AppLoadingProvider } from "@/context/AppLoadingContext";
 import { ClerkProvider } from "@clerk/nextjs";
+import RouteTransition from "@/components/common/RouteTransition";
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -28,7 +30,11 @@ export default function RootLayout({
       <body className={`${outfit.className} dark:bg-gray-900`}>
         <ClerkProvider signInUrl="/signin" signUpUrl="/signup">
           <ThemeProvider>
-            <SidebarProvider>{children}</SidebarProvider>
+            <AppLoadingProvider>
+              <SidebarProvider>
+                <RouteTransition>{children}</RouteTransition>
+              </SidebarProvider>
+            </AppLoadingProvider>
           </ThemeProvider>
         </ClerkProvider>
       </body>

@@ -535,39 +535,109 @@ function mapEventToRecording(event: GraphEvent): TrainingRecordingItem | null {
   };
 }
 
-async function fetchTrainingEvents(): Promise<GraphEvent[]> {
+function getIsoMonthsAgo(months: number): string {
+  const date = new Date();
+  date.setMonth(date.getMonth() - months);
+  return date.toISOString();
+}
+
+type FetchTrainingEventsOptions = {
+  startFromIso?: string;
+  maxPages?: number;
+  top?: number;
+};
+
+async function fetchTrainingEvents(
+  options: FetchTrainingEventsOptions = {},
+): Promise<GraphEvent[]> {
   const token = await getMicrosoftGraphAccessToken();
   const { mailbox } = getGraphContext();
   const select =
     "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting";
-  let nextUrl: string | null = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
-    mailbox,
-  )}/events?$top=100&$orderby=start/dateTime desc&$select=${encodeURIComponent(
-    select,
-  )}`;
-  const allEvents: GraphEvent[] = [];
-  const seenEventIds = new Set<string>();
-  let pageCount = 0;
-  const maxPages = 30;
 
-  while (nextUrl && pageCount < maxPages) {
-    const page: GraphEventsResponse = await graphGet<GraphEventsResponse>(token, nextUrl);
-    for (const event of page.value ?? []) {
-      const eventId = event.id?.trim();
-      if (eventId) {
-        if (seenEventIds.has(eventId)) {
-          continue;
+  const buildEventsUrl = (startFromIso?: string): string => {
+    const params = new URLSearchParams();
+    params.set("$top", String(options.top ?? 100));
+    params.set("$orderby", "start/dateTime desc");
+    params.set("$select", select);
+    if (startFromIso) {
+      const safeStart = startFromIso.replace(/'/g, "''");
+      params.set("$filter", `start/dateTime ge '${safeStart}'`);
+    }
+    return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      mailbox,
+    )}/events?${params.toString()}`;
+  };
+
+  const readPages = async (initialUrl: string, maxPages: number): Promise<GraphEvent[]> => {
+    let nextUrl: string | null = initialUrl;
+    const allEvents: GraphEvent[] = [];
+    const seenEventIds = new Set<string>();
+    let pageCount = 0;
+
+    while (nextUrl && pageCount < maxPages) {
+      const page: GraphEventsResponse = await graphGet<GraphEventsResponse>(token, nextUrl);
+      for (const event of page.value ?? []) {
+        const eventId = event.id?.trim();
+        if (eventId) {
+          if (seenEventIds.has(eventId)) {
+            continue;
+          }
+          seenEventIds.add(eventId);
         }
-        seenEventIds.add(eventId);
+        allEvents.push(event);
       }
-      allEvents.push(event);
+
+      nextUrl = page["@odata.nextLink"] ?? null;
+      pageCount += 1;
     }
 
-    nextUrl = page["@odata.nextLink"] ?? null;
-    pageCount += 1;
-  }
+    return allEvents;
+  };
 
-  return allEvents;
+  const maxPages = Math.max(1, options.maxPages ?? 10);
+
+  try {
+    return await readPages(buildEventsUrl(options.startFromIso), maxPages);
+  } catch (error) {
+    if (!options.startFromIso) {
+      throw error;
+    }
+
+    const fallbackEvents = await readPages(
+      buildEventsUrl(undefined),
+      Math.min(maxPages, 6),
+    );
+    const fromBoundary = new Date(options.startFromIso);
+    if (Number.isNaN(fromBoundary.getTime())) {
+      return fallbackEvents;
+    }
+    return fallbackEvents.filter((event) => {
+      const value = event.start?.dateTime;
+      if (!value) {
+        return false;
+      }
+      const start = new Date(value);
+      return !Number.isNaN(start.getTime()) && start >= fromBoundary;
+    });
+  }
+}
+
+async function fetchTrainingEventById(trainingId: string): Promise<GraphEvent | null> {
+  const token = await getMicrosoftGraphAccessToken();
+  const { mailbox } = getGraphContext();
+  try {
+    return await graphGet<GraphEvent>(
+      token,
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        mailbox,
+      )}/events/${encodeURIComponent(
+        trainingId,
+      )}?$select=id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting`,
+    );
+  } catch {
+    return null;
+  }
 }
 
 async function resolveOnlineMeetingId(
@@ -937,7 +1007,11 @@ async function fetchParticipantsFromCallRecords(
 }
 
 export async function fetchTeamsTrainings(): Promise<TrainingCardItem[]> {
-  const events = await fetchTrainingEvents();
+  const events = await fetchTrainingEvents({
+    startFromIso: getIsoMonthsAgo(4),
+    maxPages: 10,
+    top: 100,
+  });
   return events
     .filter((event) => event.isOnlineMeeting || Boolean(event.onlineMeetingUrl))
     .map(mapEventToTraining)
@@ -949,8 +1023,7 @@ export async function fetchTrainingDetails(
 ): Promise<TrainingDetails> {
   const token = await getMicrosoftGraphAccessToken();
   const { mailbox } = getGraphContext();
-  const events = await fetchTrainingEvents();
-  const trainingEvent = events.find((event) => event.id === trainingId);
+  const trainingEvent = await fetchTrainingEventById(trainingId);
 
   if (!trainingEvent) {
     throw new Error("Training not found");
@@ -995,7 +1068,12 @@ export async function fetchTrainingDetails(
     );
   }
 
-  const fallbackEventRecordings = events
+  const relatedEvents = await fetchTrainingEvents({
+    startFromIso: getIsoMonthsAgo(6),
+    maxPages: 8,
+    top: 100,
+  });
+  const fallbackEventRecordings = relatedEvents
     .filter((event) => {
       const sameSubject =
         (event.subject ?? "").trim().toLowerCase() === normalizedSubject;

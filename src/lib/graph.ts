@@ -545,6 +545,7 @@ type FetchTrainingEventsOptions = {
   startFromIso?: string;
   maxPages?: number;
   top?: number;
+  select?: string;
 };
 
 async function fetchTrainingEvents(
@@ -553,6 +554,7 @@ async function fetchTrainingEvents(
   const token = await getMicrosoftGraphAccessToken();
   const { mailbox } = getGraphContext();
   const select =
+    options.select ??
     "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting";
 
   const buildEventsUrl = (startFromIso?: string): string => {
@@ -623,9 +625,11 @@ async function fetchTrainingEvents(
   }
 }
 
-async function fetchTrainingEventById(trainingId: string): Promise<GraphEvent | null> {
-  const token = await getMicrosoftGraphAccessToken();
-  const { mailbox } = getGraphContext();
+async function fetchTrainingEventById(
+  token: string,
+  mailbox: string,
+  trainingId: string,
+): Promise<GraphEvent | null> {
   try {
     return await graphGet<GraphEvent>(
       token,
@@ -1009,8 +1013,9 @@ async function fetchParticipantsFromCallRecords(
 export async function fetchTeamsTrainings(): Promise<TrainingCardItem[]> {
   const events = await fetchTrainingEvents({
     startFromIso: getIsoMonthsAgo(4),
-    maxPages: 10,
+    maxPages: 6,
     top: 100,
+    select: "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer",
   });
   return events
     .filter((event) => event.isOnlineMeeting || Boolean(event.onlineMeetingUrl))
@@ -1023,7 +1028,7 @@ export async function fetchTrainingDetails(
 ): Promise<TrainingDetails> {
   const token = await getMicrosoftGraphAccessToken();
   const { mailbox } = getGraphContext();
-  const trainingEvent = await fetchTrainingEventById(trainingId);
+  const trainingEvent = await fetchTrainingEventById(token, mailbox, trainingId);
 
   if (!trainingEvent) {
     throw new Error("Training not found");
@@ -1054,13 +1059,21 @@ export async function fetchTrainingDetails(
     warnings.push(`Meeting resolution: ${attempt}`);
   }
 
-  const recordingResult = onlineMeetingId && onlineMeetingOwnerUserId
-    ? await fetchMeetingRecordings(
-        token,
-        onlineMeetingOwnerUserId,
-        onlineMeetingId,
-      )
-    : { recordings: [], error: null };
+  const emptyResult = { recordings: [], error: null } as {
+    recordings: TrainingRecordingItem[];
+    error: string | null;
+  };
+  const emptyParticipantsResult = { participants: [], error: null } as {
+    participants: TrainingParticipant[];
+    error: string | null;
+  };
+  const [recordingResult, attendanceResult] =
+    onlineMeetingId && onlineMeetingOwnerUserId
+      ? await Promise.all([
+          fetchMeetingRecordings(token, onlineMeetingOwnerUserId, onlineMeetingId),
+          fetchMeetingAttendanceParticipants(token, onlineMeetingOwnerUserId, onlineMeetingId),
+        ])
+      : [emptyResult, emptyParticipantsResult];
   const artifactRecordings = recordingResult.recordings;
   if (recordingResult.error) {
     warnings.push(
@@ -1068,24 +1081,28 @@ export async function fetchTrainingDetails(
     );
   }
 
-  const relatedEvents = await fetchTrainingEvents({
-    startFromIso: getIsoMonthsAgo(6),
-    maxPages: 8,
-    top: 100,
-  });
-  const fallbackEventRecordings = relatedEvents
-    .filter((event) => {
-      const sameSubject =
-        (event.subject ?? "").trim().toLowerCase() === normalizedSubject;
-      return sameSubject && isPastEvent(event);
-    })
-    .map(mapEventToRecording)
-    .filter((event): event is TrainingRecordingItem => Boolean(event))
-    .sort((a, b) => {
-      const aTime = a.startDateTime ? new Date(a.startDateTime).getTime() : 0;
-      const bTime = b.startDateTime ? new Date(b.startDateTime).getTime() : 0;
-      return bTime - aTime;
+  let fallbackEventRecordings: TrainingRecordingItem[] = [];
+  if (artifactRecordings.length === 0) {
+    const relatedEvents = await fetchTrainingEvents({
+      startFromIso: getIsoMonthsAgo(6),
+      maxPages: 4,
+      top: 60,
+      select: "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting",
     });
+    fallbackEventRecordings = relatedEvents
+      .filter((event) => {
+        const sameSubject =
+          (event.subject ?? "").trim().toLowerCase() === normalizedSubject;
+        return sameSubject && isPastEvent(event);
+      })
+      .map(mapEventToRecording)
+      .filter((event): event is TrainingRecordingItem => Boolean(event))
+      .sort((a, b) => {
+        const aTime = a.startDateTime ? new Date(a.startDateTime).getTime() : 0;
+        const bTime = b.startDateTime ? new Date(b.startDateTime).getTime() : 0;
+        return bTime - aTime;
+      });
+  }
 
   const recordings =
     artifactRecordings.length > 0 ? artifactRecordings : fallbackEventRecordings;
@@ -1099,14 +1116,6 @@ export async function fetchTrainingDetails(
     );
   }
 
-  const attendanceResult = onlineMeetingId
-    && onlineMeetingOwnerUserId
-    ? await fetchMeetingAttendanceParticipants(
-        token,
-        onlineMeetingOwnerUserId,
-        onlineMeetingId,
-      )
-    : { participants: [], error: null };
   const attendanceParticipants = attendanceResult.participants;
   if (attendanceResult.error) {
     warnings.push(

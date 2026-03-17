@@ -6,6 +6,8 @@ type StreamTokenPayload = {
   clientFingerprint: string;
   trainingId: string;
   recordingId: string;
+  recordingSource: "teams_artifact" | "event_link";
+  recordingUrl: string;
   expiresAt: number;
 };
 
@@ -32,6 +34,8 @@ function buildTokenMessage(payload: StreamTokenPayload): string {
     payload.clientFingerprint,
     payload.trainingId,
     payload.recordingId,
+    payload.recordingSource,
+    payload.recordingUrl,
     String(payload.expiresAt),
   ].join(":");
 }

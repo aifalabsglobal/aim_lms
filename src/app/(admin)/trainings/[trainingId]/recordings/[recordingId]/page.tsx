@@ -67,6 +67,8 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
       clientFingerprint,
       trainingId: details.training.id,
       recordingId: details.recording.id,
+      recordingSource: details.recording.source,
+      recordingUrl: details.recording.recordingUrl ?? "",
       expiresAt,
     });
     const streamUrl = `/api/trainings/${encodeURIComponent(
@@ -75,6 +77,8 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
       details.recording.id,
     )}/stream?expires=${expiresAt}&fp=${encodeURIComponent(
       clientFingerprint,
+    )}&src=${encodeURIComponent(details.recording.source)}&u=${encodeURIComponent(
+      details.recording.recordingUrl ?? "",
     )}&sig=${encodeURIComponent(streamSignature)}`;
 
     return (
@@ -103,6 +107,8 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
               controls
               controlsList="nodownload noplaybackrate"
               disablePictureInPicture
+              playsInline
+              preload="metadata"
               className="h-[520px] w-full rounded-xl border border-gray-200 bg-black dark:border-gray-800"
               src={streamUrl}
             />

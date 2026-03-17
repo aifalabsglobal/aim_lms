@@ -1,4 +1,4 @@
-import { fetchTrainingRecordingDetails, getGraphAppAccessToken } from "@/lib/graph";
+import { getGraphAppAccessToken } from "@/lib/graph";
 import {
   createClientFingerprintFromHeaders,
   verifyRecordingStreamSignature,
@@ -24,9 +24,11 @@ export async function GET(request: Request, { params }: RouteParams) {
     const signature = searchParams.get("sig")?.trim() ?? "";
     const fingerprint = searchParams.get("fp")?.trim() ?? "";
     const expiresRaw = searchParams.get("expires")?.trim() ?? "";
+    const recordingSource = searchParams.get("src")?.trim() ?? "";
+    const recordingUrl = searchParams.get("u")?.trim() ?? "";
     const expiresAt = Number.parseInt(expiresRaw, 10);
 
-    if (!signature || !fingerprint || Number.isNaN(expiresAt)) {
+    if (!signature || !fingerprint || !recordingSource || !recordingUrl || Number.isNaN(expiresAt)) {
       return NextResponse.json(
         { message: "Missing stream access signature" },
         { status: 403 },
@@ -52,6 +54,9 @@ export async function GET(request: Request, { params }: RouteParams) {
         clientFingerprint: fingerprint,
         trainingId: decodedTrainingId,
         recordingId: decodedRecordingId,
+        recordingSource:
+          recordingSource === "teams_artifact" ? "teams_artifact" : "event_link",
+        recordingUrl,
         expiresAt,
       },
       signature,
@@ -75,12 +80,6 @@ export async function GET(request: Request, { params }: RouteParams) {
       );
     }
 
-    const details = await fetchTrainingRecordingDetails(
-      decodedTrainingId,
-      decodedRecordingId,
-    );
-    const recordingUrl = details.recording.recordingUrl;
-
     if (!recordingUrl) {
       return NextResponse.json(
         { message: "Recording URL not available" },
@@ -88,9 +87,15 @@ export async function GET(request: Request, { params }: RouteParams) {
       );
     }
 
-    // If this is not a Teams artifact stream, block direct redirect
-    // so users can only view through in-app protected streaming.
-    if (details.recording.source !== "teams_artifact") {
+    if (!recordingUrl.startsWith("https://")) {
+      return NextResponse.json(
+        { message: "Invalid recording URL" },
+        { status: 403 },
+      );
+    }
+
+    // If this is not a Teams artifact stream, block in-app protected streaming.
+    if (recordingSource !== "teams_artifact") {
       return NextResponse.json(
         { message: "Recording is not available for in-app view-only playback" },
         { status: 403 },
@@ -130,7 +135,11 @@ export async function GET(request: Request, { params }: RouteParams) {
 
     if (contentType) headers.set("content-type", contentType);
     if (contentLength) headers.set("content-length", contentLength);
-    if (acceptRanges) headers.set("accept-ranges", acceptRanges);
+    if (acceptRanges) {
+      headers.set("accept-ranges", acceptRanges);
+    } else {
+      headers.set("accept-ranges", "bytes");
+    }
     if (contentRange) headers.set("content-range", contentRange);
     headers.set("content-disposition", "inline");
     headers.set("cache-control", "no-store");

@@ -46,15 +46,14 @@ function GlobalLoadingIndicator({ visible, message }: { visible: boolean; messag
       </div>
       <div
         aria-live="polite"
-        className={`pointer-events-none fixed inset-0 z-[190] transition-opacity duration-200 ${
+        className={`pointer-events-none fixed bottom-4 right-4 z-[190] transition-all duration-200 ${
           visible ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="absolute inset-0 bg-white/35 dark:bg-gray-900/35" />
-        <div className="absolute left-1/2 top-1/2 w-[260px] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-gray-200 bg-white/95 px-4 py-3 shadow-lg dark:border-gray-700 dark:bg-gray-900/95">
-          <div className="flex items-center gap-3">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-brand-300 border-t-brand-600" />
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-200">{message}</p>
+        <div className="w-[250px] rounded-xl border border-gray-200 bg-white/95 px-3 py-2 shadow-lg dark:border-gray-700 dark:bg-gray-900/95">
+          <p className="text-xs font-medium text-gray-700 dark:text-gray-200">{message}</p>
+          <div className="mt-2 h-1 w-full overflow-hidden rounded bg-brand-200/60 dark:bg-brand-400/20">
+            <div className="h-full w-1/3 animate-pulse bg-brand-600" />
           </div>
         </div>
       </div>
@@ -70,7 +69,11 @@ export function AppLoadingProvider({ children }: { children: React.ReactNode }) 
   const navigationIdsRef = useRef<Set<number>>(new Set());
   const navigationTimeoutsRef = useRef<Map<number, number>>(new Map());
   const [activeCount, setActiveCount] = useState(0);
+  const [isVisible, setIsVisible] = useState(false);
   const [message, setMessage] = useState("Loading...");
+  const visibleSinceRef = useRef<number>(0);
+  const showTimerRef = useRef<number | null>(null);
+  const hideTimerRef = useRef<number | null>(null);
 
   const startLoading = useCallback((nextMessage?: string) => {
     const id = nextIdRef.current++;
@@ -121,6 +124,35 @@ export function AppLoadingProvider({ children }: { children: React.ReactNode }) 
   }, [pathname]);
 
   useEffect(() => {
+    if (showTimerRef.current) {
+      window.clearTimeout(showTimerRef.current);
+      showTimerRef.current = null;
+    }
+    if (hideTimerRef.current) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+
+    if (activeCount > 0) {
+      showTimerRef.current = window.setTimeout(() => {
+        visibleSinceRef.current = Date.now();
+        setIsVisible(true);
+      }, 80);
+      return;
+    }
+
+    if (!isVisible) {
+      return;
+    }
+
+    const elapsed = Date.now() - visibleSinceRef.current;
+    const remaining = Math.max(0, 240 - elapsed);
+    hideTimerRef.current = window.setTimeout(() => {
+      setIsVisible(false);
+    }, remaining);
+  }, [activeCount, isVisible]);
+
+  useEffect(() => {
     const originalFetch = window.fetch.bind(window);
 
     window.fetch = async (...args) => {
@@ -131,7 +163,10 @@ export function AppLoadingProvider({ children }: { children: React.ReactNode }) 
           ? args[0].href
           : args[0]?.url;
       const isApiCall = typeof requestUrl === "string" && requestUrl.includes("/api/");
-      const token = startLoading(isApiCall ? "Loading data from Microsoft Graph..." : "Loading...");
+      if (!isApiCall) {
+        return originalFetch(...args);
+      }
+      const token = startLoading("Loading data from Microsoft Graph...");
       try {
         return await originalFetch(...args);
       } finally {
@@ -143,6 +178,17 @@ export function AppLoadingProvider({ children }: { children: React.ReactNode }) 
       window.fetch = originalFetch;
     };
   }, [startLoading, stopLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (showTimerRef.current) {
+        window.clearTimeout(showTimerRef.current);
+      }
+      if (hideTimerRef.current) {
+        window.clearTimeout(hideTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const onDocumentClick = (event: MouseEvent) => {
@@ -171,7 +217,7 @@ export function AppLoadingProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <AppLoadingContext.Provider value={value}>
-      <GlobalLoadingIndicator visible={activeCount > 0} message={message} />
+      <GlobalLoadingIndicator visible={isVisible} message={message} />
       {children}
     </AppLoadingContext.Provider>
   );

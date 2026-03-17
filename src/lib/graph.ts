@@ -513,6 +513,28 @@ function mapParticipantsFromEvent(event: GraphEvent): TrainingParticipant[] {
   return participants;
 }
 
+const ELIGIBLE_EMAILS_MARKER = "AIM_ELIGIBLE_EMAILS";
+
+function parseEligibleEmailsFromBodyHtml(html: string | undefined): string[] {
+  if (!html) {
+    return [];
+  }
+  const markerRegex = new RegExp(`${ELIGIBLE_EMAILS_MARKER}:([^<\\n\\r]+)`, "i");
+  const match = html.match(markerRegex) ?? htmlToText(html).match(markerRegex);
+  if (!match?.[1]) {
+    return [];
+  }
+  return uniqueNonEmpty(match[1].split(",").map((item) => item.trim()));
+}
+
+function getEligibleEmailsFromEvent(event: GraphEvent): string[] {
+  const attendeeEmails = uniqueNonEmpty(
+    (event.attendees ?? []).map((attendee) => attendee.emailAddress?.address ?? null),
+  );
+  const metadataEmails = parseEligibleEmailsFromBodyHtml(event.body?.content);
+  return uniqueNonEmpty([...attendeeEmails, ...metadataEmails]);
+}
+
 function isPrivilegedRole(role: string | null): boolean {
   const normalized = (role ?? "").trim().toLowerCase();
   return normalized === "admin" || normalized === "super_admin";
@@ -539,9 +561,7 @@ function canViewerAccessEvent(
     return true;
   }
 
-  return (event.attendees ?? []).some(
-    (attendee) => attendee.emailAddress?.address?.trim().toLowerCase() === email,
-  );
+  return getEligibleEmailsFromEvent(event).some((eligible) => eligible.toLowerCase() === email);
 }
 
 function isPastEvent(event: GraphEvent): boolean {
@@ -675,7 +695,7 @@ async function fetchTrainingEventById(
         mailbox,
       )}/events/${encodeURIComponent(
         trainingId,
-      )}?$select=id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting`,
+      )}?$select=id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting,body`,
     );
   } catch {
     return null;
@@ -1057,7 +1077,7 @@ export async function fetchTeamsTrainings(
     maxPages: 6,
     top: 100,
     select: needsAttendees
-      ? "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees"
+      ? "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,body"
       : "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer",
   });
   return events
@@ -1270,6 +1290,7 @@ export async function createTeamsMeeting(
     endDateTime: input.endDateTime,
     joinUrl: null,
     eventUrl: null,
+    eligibleEmails: attendeeEmails,
   });
 
   const eventBody = {
@@ -1313,6 +1334,7 @@ export async function createTeamsMeeting(
     endDateTime: created.end?.dateTime ?? input.endDateTime,
     joinUrl,
     eventUrl,
+    eligibleEmails: attendeeEmails,
   });
   try {
     const sendUpdates = attendeeEmails.length > 0 ? "all" : "none";
@@ -1368,9 +1390,7 @@ export async function fetchMeetingForEdit(meetingId: string): Promise<EditMeetin
     startDateTime,
     endDateTime,
     timeZone: event.start?.timeZone || event.end?.timeZone || "Asia/Kolkata",
-    attendeeEmails: uniqueNonEmpty(
-      (event.attendees ?? []).map((attendee) => attendee.emailAddress?.address ?? null),
-    ),
+    attendeeEmails: getEligibleEmailsFromEvent(event),
     ownerUserId,
   };
 }
@@ -1381,6 +1401,7 @@ export async function updateTeamsMeeting(
   const token = await getMicrosoftGraphAccessToken();
   const ownerUserId = input.ownerUserId?.trim() || getTargetMailbox();
   const description = input.description?.trim() || "Training session updated via AIM LMS.";
+  const attendeeEmails = uniqueNonEmpty(input.attendeeEmails ?? []);
 
   const existing = await graphGet<GraphEventCreateResponse>(
     token,
@@ -1398,9 +1419,8 @@ export async function updateTeamsMeeting(
     endDateTime: input.endDateTime,
     joinUrl: existing.onlineMeetingUrl ?? null,
     eventUrl: existing.webLink ?? null,
+    eligibleEmails: attendeeEmails,
   });
-
-  const attendeeEmails = uniqueNonEmpty(input.attendeeEmails ?? []);
 
   await graphPatchNoContent(
     token,
@@ -1504,6 +1524,7 @@ function buildMeetingInviteBodyHtml(input: {
   endDateTime: string | null;
   joinUrl: string | null;
   eventUrl: string | null;
+  eligibleEmails?: string[];
 }): string {
   const safeTitle = input.title.replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const safeDescription = (input.description || "")
@@ -1513,6 +1534,8 @@ function buildMeetingInviteBodyHtml(input: {
   const end = formatForIst(input.endDateTime);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim() || "http://localhost:3000";
   const joinUrl = input.joinUrl ?? input.eventUrl;
+  const eligibleEmails = uniqueNonEmpty(input.eligibleEmails ?? []);
+  const eligibilityMetadata = `${ELIGIBLE_EMAILS_MARKER}:${eligibleEmails.join(",")}`;
 
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;background:#f4f7fb;padding:24px;">
@@ -1547,6 +1570,9 @@ function buildMeetingInviteBodyHtml(input: {
       </div>
       <div style="padding:12px 24px;border-top:1px solid #e5eaf1;background:#f8fafc;color:#64748b;font-size:12px;">
         &copy; ${new Date().getFullYear()} AIM Technologies
+      </div>
+      <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+        ${eligibilityMetadata}
       </div>
     </div>
   </div>`;

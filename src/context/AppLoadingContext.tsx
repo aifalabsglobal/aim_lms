@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 type AppLoadingContextValue = {
   isLoading: boolean;
@@ -64,7 +64,6 @@ function GlobalLoadingIndicator({ visible, message }: { visible: boolean; messag
 
 export function AppLoadingProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   const nextIdRef = useRef(1);
   const activeIdsRef = useRef<Set<number>>(new Set());
@@ -119,7 +118,7 @@ export function AppLoadingProvider({ children }: { children: React.ReactNode }) 
     }
     navigationIdsRef.current.clear();
     setActiveCount(activeIdsRef.current.size);
-  }, [pathname, searchParams]);
+  }, [pathname]);
 
   useEffect(() => {
     const originalFetch = window.fetch.bind(window);

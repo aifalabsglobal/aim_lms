@@ -1,7 +1,6 @@
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 import { requireAppUser } from "@/lib/auth";
-import { fetchMyFiles } from "@/lib/graph";
-import { prisma } from "@/lib/prisma";
+import { fetchMyFiles, isCourseFolderUnlockedForViewer } from "@/lib/graph";
 
 export const dynamic = "force-dynamic";
 
@@ -51,23 +50,6 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
   const appUser = await requireAppUser();
   const role = appUser.role?.toLowerCase() ?? "";
   const isPrivileged = role === "admin" || role === "super_admin";
-  const normalizeCourseKey = (value: string | null | undefined): string =>
-    (value ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "");
-  const enrolledCourseKeys = !isPrivileged
-    ? new Set(
-        (
-          await prisma.enrollment.findMany({
-            where: { studentId: appUser.id },
-            include: { course: { select: { title: true } } },
-          })
-        )
-          .map((enrollment) => normalizeCourseKey(enrollment.course?.title ?? ""))
-          .filter(Boolean),
-      )
-    : new Set<string>();
   const resolvedParams = await params;
   const resolvedSearchParams: { q?: string; view?: string } = searchParams
     ? await searchParams
@@ -123,13 +105,18 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
     videoLabelById.set(item.id, `Vid ${index + 1}`);
   });
   const previewVideoId = orderedVideos[0]?.id ?? null;
-  const isCurrentFolderEnrolled =
-    isPrivileged || enrolledCourseKeys.has(normalizeCourseKey(files.currentFolderName));
+  const isCurrentFolderUnlocked = files.currentFolderId
+    ? await isCourseFolderUnlockedForViewer(files.currentFolderId, files.currentFolderName, {
+        email: appUser.email ?? null,
+        role: appUser.role ?? null,
+        userId: appUser.id,
+      })
+    : isPrivileged;
   const isItemLocked = (item: { kind: string; isVideo: boolean; id: string }): boolean =>
     !isPrivileged &&
     item.kind === "file" &&
     item.isVideo &&
-    !isCurrentFolderEnrolled &&
+    !isCurrentFolderUnlocked &&
     previewVideoId !== item.id;
 
   const visibleItems = normalizedQuery
@@ -245,7 +232,7 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
           )}
         </div>
       </div>
-      {!isPrivileged && files.currentFolderId && !isCurrentFolderEnrolled && (
+      {!isPrivileged && files.currentFolderId && !isCurrentFolderUnlocked && (
         <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-xs text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-200">
           You are in preview mode for this course. Only the first video is unlocked until you are
           enrolled.

@@ -844,6 +844,39 @@ async function isViewerEnrolledForCourseFolder(
   return enrolledKeys.has(folderKey);
 }
 
+export async function isCourseFolderUnlockedForViewer(
+  folderId: string,
+  folderName: string | null,
+  viewer?: TrainingViewerContext,
+): Promise<boolean> {
+  if (isPrivilegedRole(viewer?.role ?? null)) {
+    return true;
+  }
+
+  const enrolled = await isViewerEnrolledForCourseFolder(viewer, folderName);
+  if (enrolled) {
+    return true;
+  }
+
+  const normalizedFolderId = folderId.trim();
+  const email = normalizeEmailAddress(viewer?.email);
+  if (!normalizedFolderId || !email) {
+    return false;
+  }
+
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const directEntries = await listFolderPermissionEntries(token, ownerUserId, normalizedFolderId).catch(
+    (error): Array<{ id: string; email: string }> => {
+      if (isLikelyGraphPermissionError(error)) {
+        return [];
+      }
+      throw error;
+    },
+  );
+  return directEntries.some((entry) => entry.email === email);
+}
+
 function canViewerAccessEvent(
   viewer: TrainingViewerContext | undefined,
   event: GraphEvent,
@@ -1991,11 +2024,12 @@ export async function fetchMyFileById(
         ownerUserId,
       )}/drive/items/${encodeURIComponent(parentFolderId)}?$select=id,name,parentReference`,
     );
-    const isEnrolled = await isViewerEnrolledForCourseFolder(
-      viewer,
+    const isUnlocked = await isCourseFolderUnlockedForViewer(
+      parentFolderId,
       parentFolderMeta.name ?? null,
+      viewer,
     );
-    if (!isEnrolled && mapped.isVideo) {
+    if (!isUnlocked && mapped.isVideo) {
       const children = await fetchMyFiles(parentFolderId);
       const orderedVideos = children.items
         .filter((item) => item.kind === "file" && item.isVideo)

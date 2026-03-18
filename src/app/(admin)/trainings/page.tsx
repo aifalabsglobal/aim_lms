@@ -1,9 +1,8 @@
 import React from "react";
-import { fetchTrainingsRecordingFiles } from "@/lib/graph";
+import { fetchTrainingsRecordingFiles, isCourseFolderUnlockedForViewer } from "@/lib/graph";
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 import { requireAppUser } from "@/lib/auth";
 import RequestTrainingAccessForm from "@/components/trainings/RequestTrainingAccessForm";
-import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 function formatDate(value: string | null): string {
@@ -28,23 +27,6 @@ export default async function TrainingsPage() {
   const appUser = await requireAppUser();
   const role = appUser.role?.toLowerCase() ?? "";
   const canManageAccess = role === "admin" || role === "super_admin";
-  const normalizeCourseKey = (value: string | null | undefined): string =>
-    (value ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "");
-  const enrolledCourseKeys = !canManageAccess
-    ? new Set(
-        (
-          await prisma.enrollment.findMany({
-            where: { studentId: appUser.id },
-            include: { course: { select: { title: true } } },
-          })
-        )
-          .map((enrollment) => normalizeCourseKey(enrollment.course?.title ?? ""))
-          .filter(Boolean),
-      )
-    : new Set<string>();
 
   const recordings = await fetchTrainingsRecordingFiles({
     email: appUser.email ?? null,
@@ -64,6 +46,35 @@ export default async function TrainingsPage() {
   }
 
   const folderItems = recordings.items.filter((item) => item.kind === "folder");
+  const unlockedByFolderId = new Map<string, boolean>();
+  if (!canManageAccess) {
+    const viewer = {
+      email: appUser.email ?? null,
+      role: appUser.role ?? null,
+      userId: appUser.id,
+    };
+    const unlockedChecks = await Promise.all(
+      folderItems.map(async (item) => {
+        const unlocked = await isCourseFolderUnlockedForViewer(item.id, item.name, viewer).catch(
+          () => false,
+        );
+        return { id: item.id, unlocked };
+      }),
+    );
+    for (const entry of unlockedChecks) {
+      unlockedByFolderId.set(entry.id, entry.unlocked);
+    }
+  }
+  const sortedFolderItems = folderItems.slice().sort((a, b) => {
+    if (!canManageAccess) {
+      const aUnlocked = unlockedByFolderId.get(a.id) ?? false;
+      const bUnlocked = unlockedByFolderId.get(b.id) ?? false;
+      if (aUnlocked !== bUnlocked) {
+        return aUnlocked ? -1 : 1;
+      }
+    }
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
   let requestableCourses: Array<{ id: string; name: string }> = [];
   if (!canManageAccess && recordings.folderId !== null && folderItems.length === 0) {
     const allRecordings = await fetchTrainingsRecordingFiles().catch(() => null);
@@ -110,22 +121,45 @@ export default async function TrainingsPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {folderItems.map((item) => (
+          {sortedFolderItems.map((item) => {
+            const isUnlocked = !canManageAccess && (unlockedByFolderId.get(item.id) ?? false);
+            const folderStatusLabel = canManageAccess
+              ? "Admin"
+              : isUnlocked
+                ? "Unlocked"
+                : "Preview";
+            const folderStatusClass = canManageAccess
+              ? "border-brand-300 bg-brand-50 text-brand-700 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300"
+              : isUnlocked
+                ? "border-success-300 bg-success-50 text-success-700 dark:border-success-500/40 dark:bg-success-500/10 dark:text-success-300"
+                : "border-warning-300 bg-warning-50 text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200";
+            return (
             <div
               key={item.id}
-              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"
+              className={`rounded-2xl border bg-white p-4 shadow-theme-xs dark:bg-white/[0.03] ${
+                canManageAccess
+                  ? "border-brand-300 ring-2 ring-brand-200/60 dark:border-brand-500/50 dark:ring-brand-500/20"
+                  : isUnlocked
+                    ? "border-success-300 ring-2 ring-success-200/60 dark:border-success-500/50 dark:ring-success-500/20"
+                    : "border-warning-300 ring-2 ring-warning-200/60 dark:border-warning-500/40 dark:ring-warning-500/20"
+              }`}
             >
               <div className="mb-3 inline-flex rounded-full border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:text-gray-300">
                 Folder
+              </div>
+              <div
+                className={`mb-2 inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${folderStatusClass}`}
+              >
+                {folderStatusLabel}
               </div>
               <h2 className="line-clamp-2 text-sm font-semibold text-gray-800 dark:text-white/90">
                 {item.name}
               </h2>
               {!canManageAccess && (
                 <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                  {enrolledCourseKeys.has(normalizeCourseKey(item.name))
-                    ? "Full access (enrolled)"
-                    : "Preview only (first video unlocked)"}
+                  {isUnlocked
+                    ? "Full access (enrolled/access granted)"
+                    : "Preview unless enrolled or explicitly granted access"}
                 </p>
               )}
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -152,7 +186,7 @@ export default async function TrainingsPage() {
                 )}
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>

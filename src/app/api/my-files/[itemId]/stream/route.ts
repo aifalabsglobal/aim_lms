@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { getDefaultMeetingOwner, getGraphAppAccessToken } from "@/lib/graph";
+import { fetchMyFileById, getDefaultMeetingOwner, getGraphAppAccessToken } from "@/lib/graph";
+import { getCurrentAppUser } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 type RouteParams = {
@@ -27,6 +28,12 @@ export async function GET(request: Request, { params }: RouteParams) {
         { status: 403 },
       );
     }
+
+    const appUser = await getCurrentAppUser();
+    await fetchMyFileById(decodedItemId, {
+      email: appUser?.email ?? null,
+      role: appUser?.role ?? null,
+    });
 
     const ownerUserId = getDefaultMeetingOwner();
     const token = await getGraphAppAccessToken();

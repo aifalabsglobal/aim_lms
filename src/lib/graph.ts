@@ -330,6 +330,58 @@ type GraphDriveChildrenResponse = {
   "@odata.nextLink"?: string;
 };
 
+type GraphDrivePermission = {
+  id?: string;
+  invitation?: {
+    email?: string;
+  };
+  grantedToV2?: {
+    user?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+    siteUser?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+  };
+  grantedTo?: {
+    user?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+    siteUser?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+  };
+  grantedToIdentitiesV2?: Array<{
+    user?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+    siteUser?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+  }>;
+  grantedToIdentities?: Array<{
+    user?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+    siteUser?: {
+      email?: string;
+      userPrincipalName?: string;
+    };
+  }>;
+};
+
+type GraphDrivePermissionsResponse = {
+  value?: GraphDrivePermission[];
+  "@odata.nextLink"?: string;
+};
+
 type GraphDriveFolderMeta = {
   id?: string;
   name?: string;
@@ -355,6 +407,12 @@ export type MyFilesResult = {
   currentFolderId: string | null;
   currentFolderName: string;
   parentFolderId: string | null;
+  items: MyFileItem[];
+};
+
+export type TrainingsRecordingFilesResult = {
+  folderId: string | null;
+  folderName: string;
   items: MyFileItem[];
 };
 
@@ -657,6 +715,11 @@ function isPrivilegedRole(role: string | null): boolean {
   return normalized === "admin" || normalized === "super_admin";
 }
 
+function normalizeEmailAddress(value: string | null | undefined): string | null {
+  const normalized = value?.trim().toLowerCase().replace(/^mailto:/, "") ?? "";
+  return normalized || null;
+}
+
 function canViewerAccessEvent(
   viewer: TrainingViewerContext | undefined,
   event: GraphEvent,
@@ -679,6 +742,187 @@ function canViewerAccessEvent(
   }
 
   return getEligibleEmailsFromEvent(event).some((eligible) => eligible.toLowerCase() === email);
+}
+
+async function getAllowedFolderIdsForViewer(
+  viewer: TrainingViewerContext | undefined,
+  ownerUserId: string,
+  token: string,
+  folderIds: string[],
+): Promise<Set<string>> {
+  const allowed = new Set<string>();
+  if (!viewer || isPrivilegedRole(viewer.role)) {
+    folderIds.forEach((id) => allowed.add(id));
+    return allowed;
+  }
+
+  for (const folderId of folderIds) {
+    const canAccess = await isViewerAllowedForFolder(
+      viewer,
+      ownerUserId,
+      token,
+      folderId,
+    );
+    if (canAccess) {
+      allowed.add(folderId);
+    }
+  }
+  return allowed;
+}
+
+function extractEmailsFromPermission(permission: GraphDrivePermission): string[] {
+  return uniqueNonEmpty([
+    permission.invitation?.email,
+    permission.grantedToV2?.user?.email,
+    permission.grantedToV2?.user?.userPrincipalName,
+    permission.grantedToV2?.siteUser?.email,
+    permission.grantedToV2?.siteUser?.userPrincipalName,
+    permission.grantedTo?.user?.email,
+    permission.grantedTo?.user?.userPrincipalName,
+    permission.grantedTo?.siteUser?.email,
+    permission.grantedTo?.siteUser?.userPrincipalName,
+    ...(permission.grantedToIdentitiesV2 ?? []).flatMap((entry) => [
+      entry.user?.email ?? null,
+      entry.user?.userPrincipalName ?? null,
+      entry.siteUser?.email ?? null,
+      entry.siteUser?.userPrincipalName ?? null,
+    ]),
+    ...(permission.grantedToIdentities ?? []).flatMap((entry) => [
+      entry.user?.email ?? null,
+      entry.user?.userPrincipalName ?? null,
+      entry.siteUser?.email ?? null,
+      entry.siteUser?.userPrincipalName ?? null,
+    ]),
+  ])
+    .map((value) => normalizeEmailAddress(value))
+    .filter((value): value is string => Boolean(value));
+}
+
+async function listFolderPermissionEntries(
+  token: string,
+  ownerUserId: string,
+  folderId: string,
+): Promise<Array<{ id: string; email: string }>> {
+  let nextUrl: string | null = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+    ownerUserId,
+  )}/drive/items/${encodeURIComponent(folderId)}/permissions?$top=200`;
+  let pageCount = 0;
+  const entries: Array<{ id: string; email: string }> = [];
+
+  while (nextUrl && pageCount < 10) {
+    const page: GraphDrivePermissionsResponse = await graphGet<GraphDrivePermissionsResponse>(
+      token,
+      nextUrl,
+    );
+    for (const permission of page.value ?? []) {
+      const permissionId = permission.id?.trim();
+      if (!permissionId) {
+        continue;
+      }
+      const emails = extractEmailsFromPermission(permission);
+      for (const email of emails) {
+        entries.push({ id: permissionId, email });
+      }
+    }
+    nextUrl = page["@odata.nextLink"] ?? null;
+    pageCount += 1;
+  }
+
+  return entries;
+}
+
+function isLikelyGraphPermissionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return (
+    message.includes("accessdenied") ||
+    message.includes("forbidden") ||
+    message.includes("insufficient privileges")
+  );
+}
+
+async function canReadFolderPermissions(
+  token: string,
+  ownerUserId: string,
+  folderId: string,
+): Promise<boolean> {
+  try {
+    await listFolderPermissionEntries(token, ownerUserId, folderId);
+    return true;
+  } catch (error) {
+    if (isLikelyGraphPermissionError(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function isViewerAllowedForFolder(
+  viewer: TrainingViewerContext | undefined,
+  ownerUserId: string,
+  token: string,
+  folderId: string,
+): Promise<boolean> {
+  if (!viewer) {
+    return false;
+  }
+  if (isPrivilegedRole(viewer.role)) {
+    return true;
+  }
+
+  const email = normalizeEmailAddress(viewer.email);
+  if (!email) {
+    return false;
+  }
+
+  const canReadPermissions = await canReadFolderPermissions(
+    token,
+    ownerUserId,
+    folderId,
+  );
+  if (!canReadPermissions) {
+    // If Graph does not allow reading permission entries, do not block listing;
+    // the actual children/content requests will enforce real access server-side.
+    return true;
+  }
+
+  const directPermissions = await listFolderPermissionEntries(token, ownerUserId, folderId).catch(
+    () => [],
+  );
+  if (directPermissions.some((entry) => entry.email === email)) {
+    return true;
+  }
+
+  let currentId: string | null = folderId;
+  let hops = 0;
+  while (currentId && hops < 10) {
+    let parent: GraphDriveFolderMeta | null = null;
+    try {
+      parent = await graphGet<GraphDriveFolderMeta>(
+        token,
+        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+          ownerUserId,
+        )}/drive/items/${encodeURIComponent(currentId)}?$select=id,parentReference`,
+      );
+    } catch {
+      parent = null;
+    }
+
+    currentId = parent?.parentReference?.id?.trim() ?? null;
+    if (!currentId) {
+      return false;
+    }
+    const inheritedPermissions = await listFolderPermissionEntries(
+      token,
+      ownerUserId,
+      currentId,
+    ).catch(() => []);
+    if (inheritedPermissions.some((entry) => entry.email === email)) {
+      return true;
+    }
+    hops += 1;
+  }
+
+  return false;
 }
 
 function isPastEvent(event: GraphEvent): boolean {
@@ -1396,12 +1640,27 @@ async function fetchParticipantsFromCallRecords(
   }
 }
 
-export async function fetchMyFiles(folderId?: string): Promise<MyFilesResult> {
+export async function fetchMyFiles(
+  folderId?: string,
+  viewer?: TrainingViewerContext,
+): Promise<MyFilesResult> {
   const token = await getMicrosoftGraphAccessToken();
   const ownerUserId = getTargetMailbox();
   const normalizedFolderId = folderId?.trim() || null;
   const items: MyFileItem[] = [];
   const seenIds = new Set<string>();
+
+  if (normalizedFolderId && viewer && !isPrivilegedRole(viewer.role ?? null)) {
+    const allowed = await isViewerAllowedForFolder(
+      viewer,
+      ownerUserId,
+      token,
+      normalizedFolderId,
+    );
+    if (!allowed) {
+      throw new Error("Forbidden");
+    }
+  }
 
   let nextUrl = normalizedFolderId
     ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
@@ -1458,6 +1717,25 @@ export async function fetchMyFiles(folderId?: string): Promise<MyFilesResult> {
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   });
 
+  if (!isPrivilegedRole(viewer?.role ?? null) && !normalizedFolderId) {
+    const folderIds = items
+      .filter((item) => item.kind === "folder")
+      .map((item) => item.id);
+    const allowedIds = await getAllowedFolderIdsForViewer(
+      viewer,
+      ownerUserId,
+      token,
+      folderIds,
+    );
+    const filtered = items.filter((item) => item.kind === "folder" && allowedIds.has(item.id));
+    return {
+      currentFolderId: normalizedFolderId,
+      currentFolderName,
+      parentFolderId,
+      items: filtered,
+    };
+  }
+
   return {
     currentFolderId: normalizedFolderId,
     currentFolderName,
@@ -1466,7 +1744,10 @@ export async function fetchMyFiles(folderId?: string): Promise<MyFilesResult> {
   };
 }
 
-export async function fetchMyFileById(itemId: string): Promise<MyFileItem> {
+export async function fetchMyFileById(
+  itemId: string,
+  viewer?: TrainingViewerContext,
+): Promise<MyFileItem> {
   const token = await getMicrosoftGraphAccessToken();
   const ownerUserId = getTargetMailbox();
   const normalizedItemId = itemId.trim();
@@ -1486,7 +1767,144 @@ export async function fetchMyFileById(itemId: string): Promise<MyFileItem> {
   if (!mapped) {
     throw new Error("File not found");
   }
+  if (!isPrivilegedRole(viewer?.role ?? null)) {
+    const parentFolderId = raw.parentReference?.id?.trim() ?? null;
+    if (!parentFolderId) {
+      throw new Error("Forbidden");
+    }
+    const allowed = await isViewerAllowedForFolder(
+      viewer,
+      ownerUserId,
+      token,
+      parentFolderId,
+    );
+    if (!allowed) {
+      throw new Error("Forbidden");
+    }
+  }
   return mapped;
+}
+
+export async function listRecordingFolderAccess(folderId: string): Promise<string[]> {
+  const normalizedFolderId = folderId.trim();
+  if (!normalizedFolderId) {
+    return [];
+  }
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const entries = await listFolderPermissionEntries(token, ownerUserId, normalizedFolderId);
+  return Array.from(new Set(entries.map((entry) => entry.email))).sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
+export async function addRecordingFolderAccess(
+  folderId: string,
+  email: string,
+): Promise<string[]> {
+  const normalizedFolderId = folderId.trim();
+  const normalizedEmail = normalizeEmailAddress(email);
+  if (!normalizedFolderId || !normalizedEmail) {
+    throw new Error("Invalid folderId or email");
+  }
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  await graphPost(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/drive/items/${encodeURIComponent(normalizedFolderId)}/invite`,
+    {
+      recipients: [{ email: normalizedEmail }],
+      requireSignIn: true,
+      sendInvitation: false,
+      roles: ["read"],
+    },
+  );
+  return listRecordingFolderAccess(normalizedFolderId);
+}
+
+export async function removeRecordingFolderAccess(
+  folderId: string,
+  email: string,
+): Promise<string[]> {
+  const normalizedFolderId = folderId.trim();
+  const normalizedEmail = normalizeEmailAddress(email);
+  if (!normalizedFolderId || !normalizedEmail) {
+    throw new Error("Invalid folderId or email");
+  }
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const entries = await listFolderPermissionEntries(token, ownerUserId, normalizedFolderId);
+  const permissionIds = Array.from(
+    new Set(
+      entries
+        .filter((entry) => entry.email === normalizedEmail)
+        .map((entry) => entry.id),
+    ),
+  );
+  for (const permissionId of permissionIds) {
+    await graphDeleteNoContent(
+      token,
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        ownerUserId,
+      )}/drive/items/${encodeURIComponent(
+        normalizedFolderId,
+      )}/permissions/${encodeURIComponent(permissionId)}`,
+    ).catch(() => {
+      // Ignore undeletable permission rows (owner/system).
+    });
+  }
+  return listRecordingFolderAccess(normalizedFolderId);
+}
+
+export async function fetchTrainingsRecordingFiles(
+  viewer?: TrainingViewerContext,
+): Promise<TrainingsRecordingFilesResult> {
+  // Resolve Recordings folder from full root (unfiltered), then apply
+  // per-user access filtering on its child folders.
+  const root = await fetchMyFiles(undefined);
+  const recordingsFolder = root.items.find(
+    (item) => item.kind === "folder" && item.name.trim().toLowerCase() === "recordings",
+  );
+
+  if (!recordingsFolder) {
+    return {
+      folderId: null,
+      folderName: "Recordings",
+      items: [],
+    };
+  }
+
+  const recordings = await fetchMyFiles(recordingsFolder.id);
+  if (isPrivilegedRole(viewer?.role ?? null)) {
+    return {
+      folderId: recordingsFolder.id,
+      folderName: recordings.currentFolderName || "Recordings",
+      items: recordings.items,
+    };
+  }
+
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const folderIds = recordings.items
+    .filter((item) => item.kind === "folder")
+    .map((item) => item.id);
+  const allowedFolderIds = await getAllowedFolderIdsForViewer(
+    viewer,
+    ownerUserId,
+    token,
+    folderIds,
+  );
+  const filteredItems = recordings.items.filter(
+    (item) => item.kind === "folder" && allowedFolderIds.has(item.id),
+  );
+
+  return {
+    folderId: recordingsFolder.id,
+    folderName: recordings.currentFolderName || "Recordings",
+    items: filteredItems,
+  };
 }
 
 export async function fetchTrainingRelatedMyFiles(

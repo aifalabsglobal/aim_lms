@@ -27,10 +27,13 @@ function formatDate(value: string | null): string {
 }
 
 export default async function MyFileViewPage({ params }: MyFileViewPageProps) {
-  await requireAppUser();
+  const appUser = await requireAppUser();
   const { itemId } = await params;
   const decodedItemId = decodeURIComponent(itemId);
-  const file = await fetchMyFileById(decodedItemId).catch((error) => ({
+  const file = await fetchMyFileById(decodedItemId, {
+    email: appUser.email ?? null,
+    role: appUser.role ?? null,
+  }).catch((error) => ({
     errorMessage: error instanceof Error ? error.message : "Failed to load file",
   }));
 
@@ -80,18 +83,6 @@ export default async function MyFileViewPage({ params }: MyFileViewPageProps) {
           </div>
         )}
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {file.webUrl && (
-            <a
-              href={file.webUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              Open in OneDrive
-            </a>
-          )}
-        </div>
       </div>
     </div>
   );

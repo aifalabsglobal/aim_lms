@@ -11,7 +11,10 @@ export async function getCurrentAppUser() {
   }
 
   const clerkUser = await currentUser();
-  const clerkEmail = clerkUser?.emailAddresses[0]?.emailAddress ?? null;
+  const clerkEmail =
+    clerkUser?.primaryEmailAddress?.emailAddress ??
+    clerkUser?.emailAddresses[0]?.emailAddress ??
+    null;
   const clerkName = clerkUser
     ? [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ").trim() || null
     : null;

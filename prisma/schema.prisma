@@ -75,3 +75,4 @@ model ClerkWebhookEvent {
   status    String   @default("processed")
   createdAt DateTime @default(now())
 }
+

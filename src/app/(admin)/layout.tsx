@@ -48,7 +48,9 @@ export default function AdminLayout({
 
   useEffect(() => {
     const isAdmin = role === "admin" || role === "super_admin";
-    if (role && !isAdmin && !pathname.startsWith("/trainings")) {
+    const canAccessPath =
+      pathname.startsWith("/trainings") || pathname.startsWith("/my-files");
+    if (role && !isAdmin && !canAccessPath) {
       router.replace("/trainings");
     }
   }, [role, pathname, router]);

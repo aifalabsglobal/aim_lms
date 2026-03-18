@@ -1,26 +1,18 @@
 import React from "react";
-import Link from "next/link";
-import { fetchTeamsTrainings } from "@/lib/graph";
-import TrainingCardActions from "@/components/trainings/TrainingCardActions";
+import { fetchTrainingsRecordingFiles } from "@/lib/graph";
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 import { requireAppUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-const PAGE_SIZE = 9;
-
-type PageSearchParams = Record<string, string | string[] | undefined>;
-
 function formatDate(value: string | null): string {
   if (!value) {
-    return "Not scheduled";
+    return "Unknown";
   }
-
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return value;
   }
-
-  const formatted = new Intl.DateTimeFormat("en-IN", {
+  return new Intl.DateTimeFormat("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -28,257 +20,98 @@ function formatDate(value: string | null): string {
     minute: "2-digit",
     timeZone: "Asia/Kolkata",
   }).format(date);
-  return `${formatted} IST`;
 }
 
-function getQueryValue(
-  searchParams: PageSearchParams,
-  key: string,
-): string {
-  const value = searchParams[key];
-  if (Array.isArray(value)) {
-    return value[0] ?? "";
-  }
-  return value ?? "";
-}
-
-function parsePage(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
-}
-
-function buildTrainingsUrl(
-  page: number,
-  query: string,
-): string {
-  const params = new URLSearchParams();
-  if (query) {
-    params.set("q", query);
-  }
-  if (page > 1) {
-    params.set("page", String(page));
-  }
-  const queryString = params.toString();
-  return queryString ? `/trainings?${queryString}` : "/trainings";
-}
-
-export default async function TrainingsPage({
-  searchParams,
-}: {
-  searchParams: Promise<PageSearchParams>;
-}) {
-  const resolvedSearchParams = await searchParams;
-  const query = getQueryValue(resolvedSearchParams, "q").trim();
-  const requestedPage = parsePage(getQueryValue(resolvedSearchParams, "page"));
+export default async function TrainingsPage() {
   const appUser = await requireAppUser();
-  const role = appUser?.role?.toLowerCase() ?? null;
-  const canManageTrainings = role === "admin" || role === "super_admin";
+  const role = appUser.role?.toLowerCase() ?? "";
+  const canManageAccess = role === "admin" || role === "super_admin";
 
-  let trainings = [] as Awaited<ReturnType<typeof fetchTeamsTrainings>>;
-  let loadError: string | null = null;
+  const recordings = await fetchTrainingsRecordingFiles({
+    email: appUser.email ?? null,
+    role: appUser.role ?? null,
+  }).catch((error) => ({
+    errorMessage:
+      error instanceof Error ? error.message : "Failed to load recordings folder",
+  }));
 
-  try {
-    trainings = await fetchTeamsTrainings({
-      email: appUser?.email ?? null,
-      role: appUser?.role ?? null,
-    });
-  } catch (error) {
-    loadError =
-      error instanceof Error ? error.message : "Failed to load trainings";
+  if ("errorMessage" in recordings) {
+    return (
+      <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
+        {recordings.errorMessage}
+      </div>
+    );
   }
 
-  const queryLower = query.toLowerCase();
-  const filteredTrainings = trainings.filter((training) => {
-    const searchable = [
-      training.title,
-      training.organizerName ?? "",
-      training.organizerEmail ?? "",
-    ]
-      .join(" ")
-      .toLowerCase();
-
-    if (queryLower && !searchable.includes(queryLower)) {
-      return false;
-    }
-
-    if (!training.startDateTime) {
-      return false;
-    }
-
-    const start = new Date(training.startDateTime);
-    if (Number.isNaN(start.getTime())) {
-      return false;
-    }
-    return true;
-  });
-
-  const totalCount = filteredTrainings.length;
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-  const currentPage = Math.min(requestedPage, totalPages);
-  const startIndex = (currentPage - 1) * PAGE_SIZE;
-  const paginatedTrainings = filteredTrainings.slice(
-    startIndex,
-    startIndex + PAGE_SIZE,
-  );
+  const folderItems = recordings.items.filter((item) => item.kind === "folder");
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
-          {canManageTrainings ? "All Trainings" : "My Trainings"}
-        </h1>
-        <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          {canManageTrainings
-            ? "All calendar meetings available from Graph."
-            : "Your assigned calendar meetings from Graph."}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
+            Trainings
+          </h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Showing files from OneDrive folder: {recordings.folderName}
+          </p>
+        </div>
+        {canManageAccess && (
+          <ProgressNavLink
+            href="/my-files"
+            className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Open My Files
+          </ProgressNavLink>
+        )}
       </div>
 
-      <form
-        action="/trainings"
-        method="get"
-        className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <input
-            type="text"
-            name="q"
-            defaultValue={query}
-            placeholder="Search by title or organizer"
-            className="h-10 rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
-          />
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              className="inline-flex h-10 items-center rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600"
-            >
-              Apply
-            </button>
-            <Link
-              href="/trainings"
-              className="inline-flex h-10 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            >
-              Reset
-            </Link>
-          </div>
+      {recordings.folderId === null ? (
+        <div className="rounded-2xl border border-warning-200 bg-warning-50 p-6 text-sm text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
+          `Recordings` folder was not found in My Files root.
         </div>
-      </form>
-
-      {loadError && (
-        <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
-          {loadError}
-        </div>
-      )}
-
-      {!loadError && filteredTrainings.length === 0 && (
+      ) : folderItems.length === 0 ? (
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
-          No trainings match your filters.
+          No folders found in the `Recordings` folder.
         </div>
-      )}
-
-      {filteredTrainings.length > 0 && (
-        <>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Showing {startIndex + 1}-{Math.min(startIndex + PAGE_SIZE, totalCount)} of{" "}
-            {totalCount} trainings
-          </p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {paginatedTrainings.map((training) => (
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {folderItems.map((item) => (
             <div
-              key={training.id}
-              className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"
+              key={item.id}
+              className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"
             >
-              <h2 className="text-base font-semibold text-gray-800 dark:text-white/90">
-                {training.title}
+              <div className="mb-3 inline-flex rounded-full border border-gray-200 px-2 py-1 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:text-gray-300">
+                Folder
+              </div>
+              <h2 className="line-clamp-2 text-sm font-semibold text-gray-800 dark:text-white/90">
+                {item.name}
               </h2>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                Modified: {formatDate(item.modifiedAt)}
+              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Items: {item.childCount ?? 0}
+              </p>
 
-              <dl className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-300">
-                <div>
-                  <dt className="font-medium text-gray-700 dark:text-gray-200">
-                    Starts
-                  </dt>
-                  <dd>{formatDate(training.startDateTime)}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-gray-700 dark:text-gray-200">
-                    Ends
-                  </dt>
-                  <dd>{formatDate(training.endDateTime)}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-gray-700 dark:text-gray-200">
-                    Organizer
-                  </dt>
-                  <dd>AIM Technologies</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-gray-700 dark:text-gray-200">
-                    Time Zone
-                  </dt>
-                  <dd>IST</dd>
-                </div>
-              </dl>
-
-              <div className="mt-5 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
                 <ProgressNavLink
-                  href={`/trainings/${encodeURIComponent(training.id)}`}
-                  className="inline-flex items-center rounded-lg border border-brand-300 px-3 py-2 text-xs font-medium text-brand-700 hover:bg-brand-50 dark:border-brand-500/40 dark:text-brand-300 dark:hover:bg-brand-500/10"
+                  href={`/my-files/${encodeURIComponent(item.id)}`}
+                  className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-medium text-white hover:bg-brand-600"
                 >
-                  View Details
+                  Open Videos
                 </ProgressNavLink>
-                {training.joinUrl && (
-                  <a
-                    href={training.joinUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-medium text-white hover:bg-brand-600"
-                  >
-                    Join Meeting
-                  </a>
-                )}
-                {training.eventUrl && (
-                  <a
-                    href={training.eventUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                {canManageAccess && (
+                  <ProgressNavLink
+                    href={`/trainings/folders/${encodeURIComponent(item.id)}/access`}
                     className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
-                    View Event
-                  </a>
+                    Manage Access
+                  </ProgressNavLink>
                 )}
-                {canManageTrainings && <TrainingCardActions trainingId={training.id} />}
               </div>
             </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {!loadError && totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2">
-          <ProgressNavLink
-            href={buildTrainingsUrl(currentPage - 1, query)}
-            className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium ${
-              currentPage === 1
-                ? "pointer-events-none border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600"
-                : "border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            }`}
-          >
-            Previous
-          </ProgressNavLink>
-          <span className="text-sm text-gray-500 dark:text-gray-400">
-            Page {currentPage} of {totalPages}
-          </span>
-          <ProgressNavLink
-            href={buildTrainingsUrl(currentPage + 1, query)}
-            className={`inline-flex items-center rounded-lg border px-3 py-2 text-sm font-medium ${
-              currentPage === totalPages
-                ? "pointer-events-none border-gray-200 text-gray-400 dark:border-gray-800 dark:text-gray-600"
-                : "border-gray-300 text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            }`}
-          >
-            Next
-          </ProgressNavLink>
+          ))}
         </div>
       )}
     </div>

@@ -38,8 +38,6 @@ const navItems: NavItem[] = [
     icon: <ListIcon />,
     subItems: [
       { name: "All Trainings", path: "/trainings", pro: false },
-      { name: "My Files", path: "/my-files", pro: false },
-      { name: "Recordings", path: "/trainings", pro: false },
       { name: "Create Training", path: "/trainings/create", pro: false },
       { name: "Categories", path: "/trainings/categories", pro: false },
       { name: "Batches/Sessions", path: "/trainings/sessions", pro: false },
@@ -99,10 +97,7 @@ const learnerNavItems: NavItem[] = [
   {
     name: "Trainings",
     icon: <ListIcon />,
-    subItems: [
-      { name: "My Trainings", path: "/trainings", pro: false },
-      { name: "Recordings", path: "/trainings", pro: false },
-    ],
+    subItems: [{ name: "My Trainings", path: "/trainings", pro: false }],
   },
 ];
 const noNavItems: NavItem[] = [];

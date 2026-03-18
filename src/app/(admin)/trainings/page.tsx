@@ -2,6 +2,7 @@ import React from "react";
 import { fetchTrainingsRecordingFiles } from "@/lib/graph";
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 import { requireAppUser } from "@/lib/auth";
+import RequestTrainingAccessForm from "@/components/trainings/RequestTrainingAccessForm";
 
 export const dynamic = "force-dynamic";
 function formatDate(value: string | null): string {
@@ -44,6 +45,15 @@ export default async function TrainingsPage() {
   }
 
   const folderItems = recordings.items.filter((item) => item.kind === "folder");
+  let requestableCourses: Array<{ id: string; name: string }> = [];
+  if (!canManageAccess && recordings.folderId !== null && folderItems.length === 0) {
+    const allRecordings = await fetchTrainingsRecordingFiles().catch(() => null);
+    requestableCourses =
+      allRecordings?.items
+        ?.filter((item) => item.kind === "folder")
+        .map((item) => ({ id: item.id, name: item.name }))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })) ?? [];
+  }
 
   return (
     <div className="space-y-6">
@@ -71,8 +81,13 @@ export default async function TrainingsPage() {
           `Recordings` folder was not found in My Files root.
         </div>
       ) : folderItems.length === 0 ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
-          No folders found in the `Recordings` folder.
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
+            No folders found in the `Recordings` folder for your account.
+          </div>
+          {!canManageAccess && requestableCourses.length > 0 && (
+            <RequestTrainingAccessForm courses={requestableCourses} />
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">

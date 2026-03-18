@@ -13,7 +13,7 @@ export default function SignInPage() {
         path="/signin"
         routing="path"
         signUpUrl="/signup"
-        forceRedirectUrl="/"
+        forceRedirectUrl="/trainings"
       />
     </div>
   );

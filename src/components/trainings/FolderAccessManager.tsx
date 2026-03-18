@@ -126,6 +126,11 @@ export default function FolderAccessManager({ folderId }: FolderAccessManagerPro
             Add Access
           </button>
         </div>
+        <div className="mt-3 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-200">
+          If adding an email fails, check Microsoft 365 sharing policy: OneDrive/SharePoint
+          external sharing must allow this user or domain, and guest invitation may need to be
+          enabled in Entra ID.
+        </div>
       </div>
 
       {error && (

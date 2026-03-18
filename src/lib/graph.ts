@@ -377,6 +377,17 @@ type GraphDrivePermission = {
   }>;
 };
 
+type GraphInvitationResponse = {
+  invitedUser?: {
+    id?: string;
+  };
+};
+
+type GraphDriveRecipient = {
+  email?: string;
+  objectId?: string;
+};
+
 type GraphDrivePermissionsResponse = {
   value?: GraphDrivePermission[];
   "@odata.nextLink"?: string;
@@ -587,6 +598,68 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
 }
 
+function getGraphErrorCode(error: unknown): string | null {
+  const message = error instanceof Error ? error.message : "";
+  const jsonStart = message.indexOf("{");
+  if (jsonStart === -1) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(message.slice(jsonStart)) as {
+      error?: { code?: string };
+    };
+    const code = parsed.error?.code?.trim();
+    return code ? code.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function inviteExternalUserForSharing(token: string, email: string): Promise<boolean> {
+  const appUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
+    "https://portal.office.com";
+  try {
+    await graphPost<GraphInvitationResponse>(token, "https://graph.microsoft.com/v1.0/invitations", {
+      invitedUserEmailAddress: email,
+      inviteRedirectUrl: appUrl,
+      sendInvitationMessage: false,
+    });
+    return true;
+  } catch (error) {
+    const message = toErrorMessage(error).toLowerCase();
+    // Tenant may block guest invites or app may not have User.Invite.All.
+    if (
+      message.includes("insufficient privileges") ||
+      message.includes("authorization_requestdenied") ||
+      message.includes("forbidden")
+    ) {
+      throw new Error(
+        "Cannot auto-invite external user. Grant Microsoft Graph application permission User.Invite.All and allow B2B guest invitations in Entra ID.",
+      );
+    }
+    return false;
+  }
+}
+
+async function resolveGraphUserObjectIdByEmail(
+  token: string,
+  email: string,
+): Promise<string | null> {
+  const escaped = email.replace(/'/g, "''");
+  const url = `https://graph.microsoft.com/v1.0/users?$top=1&$select=id,mail,userPrincipalName&$filter=${encodeURIComponent(
+    `mail eq '${escaped}' or userPrincipalName eq '${escaped}'`,
+  )}`;
+  try {
+    const response = await graphGet<{ value?: GraphUser[] }>(token, url);
+    const id = response.value?.[0]?.id?.trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
 function getGraphContext() {
   return {
     mailbox: getTargetMailbox(),
@@ -755,16 +828,28 @@ async function getAllowedFolderIdsForViewer(
     folderIds.forEach((id) => allowed.add(id));
     return allowed;
   }
+  if (folderIds.length === 0) {
+    return allowed;
+  }
 
-  for (const folderId of folderIds) {
-    const canAccess = await isViewerAllowedForFolder(
-      viewer,
-      ownerUserId,
-      token,
-      folderId,
-    );
-    if (canAccess) {
-      allowed.add(folderId);
+  const permissionCache = createPermissionLookupCache();
+  const checks = await mapWithConcurrency(
+    folderIds,
+    8,
+    async (folderId): Promise<{ folderId: string; canAccess: boolean }> => {
+      const canAccess = await isViewerAllowedForFolder(
+        viewer,
+        ownerUserId,
+        token,
+        folderId,
+        permissionCache,
+      );
+      return { folderId, canAccess };
+    },
+  );
+  for (const check of checks) {
+    if (check.canAccess) {
+      allowed.add(check.folderId);
     }
   }
   return allowed;
@@ -840,20 +925,83 @@ function isLikelyGraphPermissionError(error: unknown): boolean {
   );
 }
 
-async function canReadFolderPermissions(
+type PermissionLookupCache = {
+  permissionEntriesByFolderId: Map<string, Promise<Array<{ id: string; email: string }>>>;
+  parentIdByFolderId: Map<string, Promise<string | null>>;
+  viewerAllowanceByFolderAndEmail: Map<string, Promise<boolean>>;
+};
+
+function createPermissionLookupCache(): PermissionLookupCache {
+  return {
+    permissionEntriesByFolderId: new Map(),
+    parentIdByFolderId: new Map(),
+    viewerAllowanceByFolderAndEmail: new Map(),
+  };
+}
+
+async function getFolderPermissionEntriesCached(
   token: string,
   ownerUserId: string,
   folderId: string,
-): Promise<boolean> {
-  try {
-    await listFolderPermissionEntries(token, ownerUserId, folderId);
-    return true;
-  } catch (error) {
-    if (isLikelyGraphPermissionError(error)) {
-      return false;
-    }
-    throw error;
+  cache: PermissionLookupCache,
+): Promise<Array<{ id: string; email: string }>> {
+  const existing = cache.permissionEntriesByFolderId.get(folderId);
+  if (existing) {
+    return existing;
   }
+  const pending = listFolderPermissionEntries(token, ownerUserId, folderId);
+  cache.permissionEntriesByFolderId.set(folderId, pending);
+  return pending;
+}
+
+async function getParentFolderIdCached(
+  token: string,
+  ownerUserId: string,
+  folderId: string,
+  cache: PermissionLookupCache,
+): Promise<string | null> {
+  const existing = cache.parentIdByFolderId.get(folderId);
+  if (existing) {
+    return existing;
+  }
+  const pending = graphGet<GraphDriveFolderMeta>(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/drive/items/${encodeURIComponent(folderId)}?$select=id,parentReference`,
+  )
+    .then((meta) => meta.parentReference?.id?.trim() ?? null)
+    .catch(() => null);
+  cache.parentIdByFolderId.set(folderId, pending);
+  return pending;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  const limit = Math.max(1, concurrency);
+  let cursor = 0;
+
+  const worker = async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) {
+        return;
+      }
+      results[index] = await mapper(items[index], index);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      await worker();
+    }),
+  );
+  return results;
 }
 
 async function isViewerAllowedForFolder(
@@ -861,6 +1009,7 @@ async function isViewerAllowedForFolder(
   ownerUserId: string,
   token: string,
   folderId: string,
+  cache: PermissionLookupCache = createPermissionLookupCache(),
 ): Promise<boolean> {
   if (!viewer) {
     return false;
@@ -873,56 +1022,68 @@ async function isViewerAllowedForFolder(
   if (!email) {
     return false;
   }
-
-  const canReadPermissions = await canReadFolderPermissions(
-    token,
-    ownerUserId,
-    folderId,
-  );
-  if (!canReadPermissions) {
-    // If Graph does not allow reading permission entries, do not block listing;
-    // the actual children/content requests will enforce real access server-side.
-    return true;
+  const allowanceKey = `${folderId.toLowerCase()}|${email}`;
+  const cachedAllowance = cache.viewerAllowanceByFolderAndEmail.get(allowanceKey);
+  if (cachedAllowance) {
+    return cachedAllowance;
   }
 
-  const directPermissions = await listFolderPermissionEntries(token, ownerUserId, folderId).catch(
-    () => [],
-  );
-  if (directPermissions.some((entry) => entry.email === email)) {
-    return true;
-  }
-
-  let currentId: string | null = folderId;
-  let hops = 0;
-  while (currentId && hops < 10) {
-    let parent: GraphDriveFolderMeta | null = null;
-    try {
-      parent = await graphGet<GraphDriveFolderMeta>(
-        token,
-        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
-          ownerUserId,
-        )}/drive/items/${encodeURIComponent(currentId)}?$select=id,parentReference`,
-      );
-    } catch {
-      parent = null;
-    }
-
-    currentId = parent?.parentReference?.id?.trim() ?? null;
-    if (!currentId) {
-      return false;
-    }
-    const inheritedPermissions = await listFolderPermissionEntries(
+  const pendingAllowance = (async (): Promise<boolean> => {
+    const directPermissions = await getFolderPermissionEntriesCached(
       token,
       ownerUserId,
-      currentId,
-    ).catch(() => []);
-    if (inheritedPermissions.some((entry) => entry.email === email)) {
+      folderId,
+      cache,
+    ).catch((error) => {
+      if (isLikelyGraphPermissionError(error)) {
+        return null;
+      }
+      throw error;
+    });
+
+    if (directPermissions === null) {
+      // If Graph does not allow reading permission entries, do not block listing;
+      // the actual children/content requests will enforce real access server-side.
       return true;
     }
-    hops += 1;
-  }
+    if (directPermissions.some((entry) => entry.email === email)) {
+      return true;
+    }
 
-  return false;
+    let currentId: string | null = folderId;
+    let hops = 0;
+    while (currentId && hops < 10) {
+      const parentId = await getParentFolderIdCached(token, ownerUserId, currentId, cache);
+      if (!parentId) {
+        return false;
+      }
+
+      const inheritedPermissions = await getFolderPermissionEntriesCached(
+        token,
+        ownerUserId,
+        parentId,
+        cache,
+      ).catch((error) => {
+        if (isLikelyGraphPermissionError(error)) {
+          return null;
+        }
+        throw error;
+      });
+      if (inheritedPermissions === null) {
+        return true;
+      }
+      if (inheritedPermissions.some((entry) => entry.email === email)) {
+        return true;
+      }
+
+      currentId = parentId;
+      hops += 1;
+    }
+
+    return false;
+  })();
+  cache.viewerAllowanceByFolderAndEmail.set(allowanceKey, pendingAllowance);
+  return pendingAllowance;
 }
 
 function isPastEvent(event: GraphEvent): boolean {
@@ -1809,18 +1970,71 @@ export async function addRecordingFolderAccess(
   }
   const token = await getMicrosoftGraphAccessToken();
   const ownerUserId = getTargetMailbox();
-  await graphPost(
-    token,
-    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
-      ownerUserId,
-    )}/drive/items/${encodeURIComponent(normalizedFolderId)}/invite`,
-    {
-      recipients: [{ email: normalizedEmail }],
+  const resolvedObjectId = await resolveGraphUserObjectIdByEmail(token, normalizedEmail);
+  const recipient: GraphDriveRecipient = resolvedObjectId
+    ? { objectId: resolvedObjectId }
+    : { email: normalizedEmail };
+  const existing = await listFolderPermissionEntries(token, ownerUserId, normalizedFolderId).catch(
+    () => [],
+  );
+  if (existing.some((entry) => entry.email === normalizedEmail)) {
+    return listRecordingFolderAccess(normalizedFolderId);
+  }
+
+  const inviteUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+    ownerUserId,
+  )}/drive/items/${encodeURIComponent(normalizedFolderId)}/invite`;
+
+  try {
+    await graphPost(token, inviteUrl, {
+      recipients: [recipient],
       requireSignIn: true,
       sendInvitation: false,
       roles: ["read"],
-    },
-  );
+    });
+  } catch (firstError) {
+    const code = getGraphErrorCode(firstError);
+    if (code === "sharingfailed") {
+      try {
+        await graphPost(token, inviteUrl, {
+          recipients: [recipient],
+          requireSignIn: true,
+          sendInvitation: true,
+          roles: ["read"],
+        });
+      } catch (secondError) {
+        const secondCode = getGraphErrorCode(secondError);
+        if (secondCode === "sharingfailed") {
+          const invited = await inviteExternalUserForSharing(token, normalizedEmail);
+          if (invited) {
+            try {
+              await graphPost(token, inviteUrl, {
+                recipients: [{ email: normalizedEmail }],
+                requireSignIn: true,
+                sendInvitation: true,
+                roles: ["read"],
+              });
+            } catch (thirdError) {
+              const thirdCode = getGraphErrorCode(thirdError);
+              if (thirdCode === "sharingfailed") {
+                throw new Error(
+                  `Sharing failed for ${normalizedEmail}. Tenant sharing policy is still blocking this user/domain.`,
+                );
+              }
+              throw thirdError;
+            }
+          } else {
+            throw new Error(
+              `Sharing failed for ${normalizedEmail}. This email may be blocked by tenant sharing policy or not available as an allowed guest user.`,
+            );
+          }
+        }
+        throw secondError;
+      }
+    } else {
+      throw firstError;
+    }
+  }
   return listRecordingFolderAccess(normalizedFolderId);
 }
 

@@ -15,7 +15,15 @@ import {
   UserCircleIcon,
 } from "../icons/index";
 
-type AppRole = "admin" | "super_admin" | "student" | "trainer" | "coordinator" | "staff" | "tutor" | null;
+export type AppRole =
+  | "admin"
+  | "super_admin"
+  | "student"
+  | "trainer"
+  | "coordinator"
+  | "staff"
+  | "tutor"
+  | null;
 
 type NavItem = {
   name: string;
@@ -102,10 +110,13 @@ const learnerNavItems: NavItem[] = [
 ];
 const noNavItems: NavItem[] = [];
 
-const AppSidebar: React.FC = () => {
+type AppSidebarProps = {
+  role: AppRole;
+};
+
+const AppSidebar: React.FC<AppSidebarProps> = ({ role }) => {
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
-  const [role, setRole] = useState<AppRole>(null);
 
   const renderMenuItems = (
     navItems: NavItem[],
@@ -249,29 +260,6 @@ const AppSidebar: React.FC = () => {
    const isActive = useCallback((path: string) => path === pathname, [pathname]);
 
   useEffect(() => {
-    let isMounted = true;
-    async function loadRole() {
-      try {
-        const response = await fetch("/api/me", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as { role?: string | null };
-        if (isMounted) {
-          const incomingRole = data.role?.toLowerCase() ?? null;
-          setRole((incomingRole as AppRole) ?? null);
-        }
-      } catch {
-        // keep default restricted nav when role can't be fetched
-      }
-    }
-    loadRole();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     ["main", "others"].forEach((menuType) => {
       const items = menuType === "main" ? activeMainItems : activeOtherItems;
       items.forEach((nav, index) => {
@@ -331,30 +319,23 @@ const AppSidebar: React.FC = () => {
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
-        className={`py-8 flex  ${
-          !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
-        }`}
+        className={`flex py-8 ${!isExpanded && !isHovered ? "lg:justify-center" : "justify-start"}`}
       >
         <Link href="/" className="flex items-center gap-2">
           {isExpanded || isHovered || isMobileOpen ? (
-            <>
+            <div className="relative rounded-xl bg-white/70 px-2 py-1 shadow-[0_0_26px_rgba(45,212,191,0.35)] ring-1 ring-brand-200/60 dark:bg-gray-900/60 dark:shadow-[0_0_26px_rgba(56,189,248,0.35)] dark:ring-brand-500/30">
               <Image
-                src="/images/logo/logo-icon.svg"
-                alt="Logo"
-                width={32}
-                height={32}
+                src="/images/logo/aim-logo.png"
+                alt="AIM Technologies"
+                width={156}
+                height={48}
+                priority
               />
-              <span className="text-sm font-semibold text-gray-800 dark:text-white/90">
-                AIM LMS
-              </span>
-            </>
+            </div>
           ) : (
-            <Image
-              src="/images/logo/logo-icon.svg"
-              alt="Logo"
-              width={32}
-              height={32}
-            />
+            <div className="rounded-xl bg-white/70 p-1.5 shadow-[0_0_20px_rgba(45,212,191,0.35)] ring-1 ring-brand-200/60 dark:bg-gray-900/60 dark:shadow-[0_0_20px_rgba(56,189,248,0.35)] dark:ring-brand-500/30">
+              <Image src="/images/logo/aim-logo.png" alt="AIM Logo" width={32} height={32} />
+            </div>
           )}
         </Link>
       </div>

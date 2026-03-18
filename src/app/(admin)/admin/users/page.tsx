@@ -1,11 +1,10 @@
 import React from "react";
-import AdminComingSoon from "@/components/common/AdminComingSoon";
+import { requireRole } from "@/lib/auth";
+import AdminAccessRequestsTable from "@/components/trainings/AdminAccessRequestsTable";
 
-export default function AdminUsersPage() {
-  return (
-    <AdminComingSoon
-      title="Users & Roles"
-      description="Manage platform users, permissions, and role assignments."
-    />
-  );
+export const dynamic = "force-dynamic";
+
+export default async function AdminUsersPage() {
+  await requireRole(["ADMIN", "SUPER_ADMIN"]);
+  return <AdminAccessRequestsTable />;
 }

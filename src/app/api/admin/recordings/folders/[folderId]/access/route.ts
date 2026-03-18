@@ -49,6 +49,12 @@ export async function POST(request: Request, { params }: RouteParams) {
     if (message.toLowerCase().includes("invalid")) {
       return NextResponse.json({ message }, { status: 400 });
     }
+    if (message.toLowerCase().includes("sharing failed")) {
+      return NextResponse.json({ message }, { status: 400 });
+    }
+    if (message.toLowerCase().includes("cannot auto-invite external user")) {
+      return NextResponse.json({ message }, { status: 400 });
+    }
     return NextResponse.json({ message }, { status: 500 });
   }
 }

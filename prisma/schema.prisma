@@ -17,6 +17,7 @@ model User {
   role        Role?        @default(STUDENT)
   courses     Course[]     @relation("TutorCourses")
   enrollments Enrollment[] @relation("StudentEnrollments")
+  accessRequests RecordingAccessRequest[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -74,5 +75,27 @@ model ClerkWebhookEvent {
   eventType String
   status    String   @default("processed")
   createdAt DateTime @default(now())
+}
+
+enum RecordingAccessRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model RecordingAccessRequest {
+  id             String                      @id @default(cuid())
+  userId         String
+  user           User                        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userEmail      String
+  courseFolderId String
+  courseName     String
+  status         RecordingAccessRequestStatus @default(PENDING)
+  requestedAt    DateTime                    @default(now())
+  reviewedAt     DateTime?
+  updatedAt      DateTime                    @updatedAt
+
+  @@unique([userId, courseFolderId])
+  @@index([status, requestedAt])
 }
 

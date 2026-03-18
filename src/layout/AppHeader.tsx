@@ -83,16 +83,16 @@ const AppHeader: React.FC = () => {
             {/* Cross Icon */}
           </button>
 
-          <Link href="/" className="lg:hidden flex items-center gap-2">
-            <Image
-              width={32}
-              height={32}
-              src="./images/logo/logo-icon.svg"
-              alt="AIM LMS"
-            />
-            <span className="text-base font-semibold text-gray-800 dark:text-white/90">
-              AIM LMS
-            </span>
+          <Link href="/" className="flex items-center lg:hidden">
+            <div className="rounded-xl bg-white/70 px-2 py-1 shadow-[0_0_24px_rgba(45,212,191,0.35)] ring-1 ring-brand-200/60 dark:bg-gray-900/60 dark:shadow-[0_0_24px_rgba(56,189,248,0.35)] dark:ring-brand-500/30">
+              <Image
+                width={128}
+                height={40}
+                src="/images/logo/aim-logo.png"
+                alt="AIM Technologies"
+                priority
+              />
+            </div>
           </Link>
 
           <button

@@ -21,14 +21,16 @@ export default function AuthLayout({
               {/* <!-- ===== Common Grid Shape Start ===== --> */}
               <GridShape />
               <div className="flex flex-col items-center max-w-xs">
-                <Link href="/" className="mb-4 flex items-center gap-2">
-                  <Image
-                    width={32}
-                    height={32}
-                    src="./images/logo/logo-icon.svg"
-                    alt="AIM LMS"
-                  />
-                  <span className="text-xl font-semibold text-white">AIM LMS</span>
+                <Link href="/" className="mb-4">
+                  <div className="rounded-2xl bg-white/90 px-3 py-2 shadow-[0_0_40px_rgba(45,212,191,0.45)] ring-1 ring-white/60 dark:bg-gray-900/60 dark:shadow-[0_0_40px_rgba(56,189,248,0.45)] dark:ring-brand-500/30">
+                    <Image
+                      width={180}
+                      height={56}
+                      src="/images/logo/aim-logo.png"
+                      alt="AIM Technologies"
+                      priority
+                    />
+                  </div>
                 </Link>
                 <p className="text-center text-gray-400 dark:text-white/60">
                   AIM LMS - Learning platform for training delivery and tracking

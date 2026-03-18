@@ -1,6 +1,7 @@
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 import { requireAppUser } from "@/lib/auth";
 import { fetchMyFiles } from "@/lib/graph";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,23 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
   const appUser = await requireAppUser();
   const role = appUser.role?.toLowerCase() ?? "";
   const isPrivileged = role === "admin" || role === "super_admin";
+  const normalizeCourseKey = (value: string | null | undefined): string =>
+    (value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+  const enrolledCourseKeys = !isPrivileged
+    ? new Set(
+        (
+          await prisma.enrollment.findMany({
+            where: { studentId: appUser.id },
+            include: { course: { select: { title: true } } },
+          })
+        )
+          .map((enrollment) => normalizeCourseKey(enrollment.course?.title ?? ""))
+          .filter(Boolean),
+      )
+    : new Set<string>();
   const resolvedParams = await params;
   const resolvedSearchParams: { q?: string; view?: string } = searchParams
     ? await searchParams
@@ -60,10 +78,16 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
   const rawQuery = (resolvedSearchParams.q ?? "").trim();
   const normalizedQuery = rawQuery.toLowerCase();
   const viewMode = resolvedSearchParams.view === "list" ? "list" : "tiles";
-  const files = await fetchMyFiles(folderId, {
-    email: appUser.email ?? null,
-    role: appUser.role ?? null,
-  }).catch((error) => ({
+  const files = await fetchMyFiles(
+    folderId,
+    isPrivileged
+      ? {
+          email: appUser.email ?? null,
+          role: appUser.role ?? null,
+          userId: appUser.id,
+        }
+      : undefined,
+  ).catch((error) => ({
     errorMessage:
       error instanceof Error ? error.message : "Failed to load OneDrive files",
   }));
@@ -98,6 +122,15 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
   orderedVideos.forEach((item, index) => {
     videoLabelById.set(item.id, `Vid ${index + 1}`);
   });
+  const previewVideoId = orderedVideos[0]?.id ?? null;
+  const isCurrentFolderEnrolled =
+    isPrivileged || enrolledCourseKeys.has(normalizeCourseKey(files.currentFolderName));
+  const isItemLocked = (item: { kind: string; isVideo: boolean; id: string }): boolean =>
+    !isPrivileged &&
+    item.kind === "file" &&
+    item.isVideo &&
+    !isCurrentFolderEnrolled &&
+    previewVideoId !== item.id;
 
   const visibleItems = normalizedQuery
     ? files.items.filter((item) => {
@@ -212,6 +245,12 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
           )}
         </div>
       </div>
+      {!isPrivileged && files.currentFolderId && !isCurrentFolderEnrolled && (
+        <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-xs text-warning-800 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-200">
+          You are in preview mode for this course. Only the first video is unlocked until you are
+          enrolled.
+        </div>
+      )}
 
       {sortedVisibleItems.length === 0 ? (
         <div className="rounded-2xl border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-300">
@@ -262,6 +301,10 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
                   >
                     Open Folder
                   </ProgressNavLink>
+                ) : isItemLocked(item) ? (
+                  <span className="inline-flex items-center rounded-lg border border-warning-300 bg-warning-50 px-3 py-1.5 text-xs font-medium text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200">
+                    Locked
+                  </span>
                 ) : (
                   <ProgressNavLink
                     href={`/my-files/file/${encodeURIComponent(item.id)}`}
@@ -315,6 +358,10 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
                   >
                     Open Folder
                   </ProgressNavLink>
+                ) : isItemLocked(item) ? (
+                  <span className="inline-flex items-center rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs font-medium text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200">
+                    Locked
+                  </span>
                 ) : (
                   <ProgressNavLink
                     href={`/my-files/file/${encodeURIComponent(item.id)}`}

@@ -33,6 +33,7 @@ export default async function MyFileViewPage({ params }: MyFileViewPageProps) {
   const file = await fetchMyFileById(decodedItemId, {
     email: appUser.email ?? null,
     role: appUser.role ?? null,
+    userId: appUser.id,
   }).catch((error) => ({
     errorMessage: error instanceof Error ? error.message : "Failed to load file",
   }));

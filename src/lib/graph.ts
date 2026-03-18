@@ -1,3 +1,5 @@
+import { prisma } from "@/lib/prisma";
+
 type GraphTokenResponse = {
   access_token?: string;
   error?: string;
@@ -162,6 +164,7 @@ export type TrainingRecordingDetails = {
 export type TrainingViewerContext = {
   email: string | null;
   role: string | null;
+  userId?: string | null;
 };
 
 export type CreateMeetingInput = {
@@ -791,6 +794,54 @@ function isPrivilegedRole(role: string | null): boolean {
 function normalizeEmailAddress(value: string | null | undefined): string | null {
   const normalized = value?.trim().toLowerCase().replace(/^mailto:/, "") ?? "";
   return normalized || null;
+}
+
+function normalizeCourseKey(value: string | null | undefined): string {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+async function getEnrolledCourseNameKeysForUser(userId: string): Promise<Set<string>> {
+  const normalizedUserId = userId.trim();
+  if (!normalizedUserId) {
+    return new Set<string>();
+  }
+  const enrollments = await prisma.enrollment.findMany({
+    where: { studentId: normalizedUserId },
+    include: {
+      course: {
+        select: {
+          title: true,
+        },
+      },
+    },
+  });
+  return new Set(
+    enrollments
+      .map((enrollment) => normalizeCourseKey(enrollment.course?.title ?? ""))
+      .filter(Boolean),
+  );
+}
+
+async function isViewerEnrolledForCourseFolder(
+  viewer: TrainingViewerContext | undefined,
+  folderName: string | null,
+): Promise<boolean> {
+  if (isPrivilegedRole(viewer?.role ?? null)) {
+    return true;
+  }
+  const viewerUserId = viewer?.userId?.trim() ?? "";
+  if (!viewerUserId) {
+    return false;
+  }
+  const folderKey = normalizeCourseKey(folderName);
+  if (!folderKey) {
+    return false;
+  }
+  const enrolledKeys = await getEnrolledCourseNameKeysForUser(viewerUserId);
+  return enrolledKeys.has(folderKey);
 }
 
 function canViewerAccessEvent(
@@ -1933,14 +1984,37 @@ export async function fetchMyFileById(
     if (!parentFolderId) {
       throw new Error("Forbidden");
     }
-    const allowed = await isViewerAllowedForFolder(
-      viewer,
-      ownerUserId,
+
+    const parentFolderMeta = await graphGet<GraphDriveFolderMeta>(
       token,
-      parentFolderId,
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        ownerUserId,
+      )}/drive/items/${encodeURIComponent(parentFolderId)}?$select=id,name,parentReference`,
     );
-    if (!allowed) {
-      throw new Error("Forbidden");
+    const isEnrolled = await isViewerEnrolledForCourseFolder(
+      viewer,
+      parentFolderMeta.name ?? null,
+    );
+    if (!isEnrolled && mapped.isVideo) {
+      const children = await fetchMyFiles(parentFolderId);
+      const orderedVideos = children.items
+        .filter((item) => item.kind === "file" && item.isVideo)
+        .slice()
+        .sort((a, b) => {
+          const aTime = a.modifiedAt ? Date.parse(a.modifiedAt) : Number.POSITIVE_INFINITY;
+          const bTime = b.modifiedAt ? Date.parse(b.modifiedAt) : Number.POSITIVE_INFINITY;
+          const timeDiff =
+            (Number.isNaN(aTime) ? Number.POSITIVE_INFINITY : aTime) -
+            (Number.isNaN(bTime) ? Number.POSITIVE_INFINITY : bTime);
+          if (timeDiff !== 0) {
+            return timeDiff;
+          }
+          return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+        });
+      const previewVideoId = orderedVideos[0]?.id ?? null;
+      if (!previewVideoId || previewVideoId !== mapped.id) {
+        throw new Error("Locked: Enroll in this course to unlock all videos.");
+      }
     }
   }
   return mapped;
@@ -2076,7 +2150,7 @@ export async function fetchTrainingsRecordingFiles(
   viewer?: TrainingViewerContext,
 ): Promise<TrainingsRecordingFilesResult> {
   // Resolve Recordings folder from full root (unfiltered), then apply
-  // per-user access filtering on its child folders.
+  // per-user UI rules at page level.
   const root = await fetchMyFiles(undefined);
   const recordingsFolder = root.items.find(
     (item) => item.kind === "folder" && item.name.trim().toLowerCase() === "recordings",
@@ -2090,34 +2164,12 @@ export async function fetchTrainingsRecordingFiles(
     };
   }
 
-  const recordings = await fetchMyFiles(recordingsFolder.id);
-  if (isPrivilegedRole(viewer?.role ?? null)) {
-    return {
-      folderId: recordingsFolder.id,
-      folderName: recordings.currentFolderName || "Recordings",
-      items: recordings.items,
-    };
-  }
-
-  const token = await getMicrosoftGraphAccessToken();
-  const ownerUserId = getTargetMailbox();
-  const folderIds = recordings.items
-    .filter((item) => item.kind === "folder")
-    .map((item) => item.id);
-  const allowedFolderIds = await getAllowedFolderIdsForViewer(
-    viewer,
-    ownerUserId,
-    token,
-    folderIds,
-  );
-  const filteredItems = recordings.items.filter(
-    (item) => item.kind === "folder" && allowedFolderIds.has(item.id),
-  );
+  const recordings = await fetchMyFiles(recordingsFolder.id, isPrivilegedRole(viewer?.role ?? null) ? viewer : undefined);
 
   return {
     folderId: recordingsFolder.id,
     folderName: recordings.currentFolderName || "Recordings",
-    items: filteredItems,
+    items: recordings.items,
   };
 }
 

@@ -33,6 +33,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     await fetchMyFileById(decodedItemId, {
       email: appUser?.email ?? null,
       role: appUser?.role ?? null,
+      userId: appUser?.id ?? null,
     });
 
     const ownerUserId = getDefaultMeetingOwner();

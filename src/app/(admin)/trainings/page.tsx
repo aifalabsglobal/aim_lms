@@ -3,6 +3,7 @@ import { fetchTrainingsRecordingFiles } from "@/lib/graph";
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
 import { requireAppUser } from "@/lib/auth";
 import RequestTrainingAccessForm from "@/components/trainings/RequestTrainingAccessForm";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 function formatDate(value: string | null): string {
@@ -27,10 +28,28 @@ export default async function TrainingsPage() {
   const appUser = await requireAppUser();
   const role = appUser.role?.toLowerCase() ?? "";
   const canManageAccess = role === "admin" || role === "super_admin";
+  const normalizeCourseKey = (value: string | null | undefined): string =>
+    (value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+  const enrolledCourseKeys = !canManageAccess
+    ? new Set(
+        (
+          await prisma.enrollment.findMany({
+            where: { studentId: appUser.id },
+            include: { course: { select: { title: true } } },
+          })
+        )
+          .map((enrollment) => normalizeCourseKey(enrollment.course?.title ?? ""))
+          .filter(Boolean),
+      )
+    : new Set<string>();
 
   const recordings = await fetchTrainingsRecordingFiles({
     email: appUser.email ?? null,
     role: appUser.role ?? null,
+    userId: appUser.id,
   }).catch((error) => ({
     errorMessage:
       error instanceof Error ? error.message : "Failed to load recordings folder",
@@ -102,6 +121,13 @@ export default async function TrainingsPage() {
               <h2 className="line-clamp-2 text-sm font-semibold text-gray-800 dark:text-white/90">
                 {item.name}
               </h2>
+              {!canManageAccess && (
+                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  {enrolledCourseKeys.has(normalizeCourseKey(item.name))
+                    ? "Full access (enrolled)"
+                    : "Preview only (first video unlocked)"}
+                </p>
+              )}
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 Modified: {formatDate(item.modifiedAt)}
               </p>

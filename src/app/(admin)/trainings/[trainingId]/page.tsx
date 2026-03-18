@@ -68,6 +68,12 @@ export default async function TrainingDetailPage({
           <div className="flex flex-wrap items-center justify-end gap-2">
             {canManageTrainings && <TrainingCardActions trainingId={details.training.id} />}
             <ProgressNavLink
+              href={`/my-files/training/${encodeURIComponent(details.training.id)}`}
+              className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600"
+            >
+              Related Files
+            </ProgressNavLink>
+            <ProgressNavLink
               href="/trainings"
               className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
             >

@@ -55,7 +55,11 @@ export async function GET(request: Request, { params }: RouteParams) {
         trainingId: decodedTrainingId,
         recordingId: decodedRecordingId,
         recordingSource:
-          recordingSource === "teams_artifact" ? "teams_artifact" : "event_link",
+          recordingSource === "teams_artifact"
+            ? "teams_artifact"
+            : recordingSource === "drive_file"
+            ? "drive_file"
+            : "event_link",
         recordingUrl,
         expiresAt,
       },
@@ -94,8 +98,8 @@ export async function GET(request: Request, { params }: RouteParams) {
       );
     }
 
-    // If this is not a Teams artifact stream, block in-app protected streaming.
-    if (recordingSource !== "teams_artifact") {
+    // Allow secure in-app streaming for Teams artifacts and Drive-backed files.
+    if (recordingSource !== "teams_artifact" && recordingSource !== "drive_file") {
       return NextResponse.json(
         { message: "Recording is not available for in-app view-only playback" },
         { status: 403 },

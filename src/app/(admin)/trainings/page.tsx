@@ -7,7 +7,6 @@ import { requireAppUser } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 const PAGE_SIZE = 9;
-const LAST_MONTHS_WINDOW = 4;
 
 type PageSearchParams = Record<string, string | string[] | undefined>;
 
@@ -46,13 +45,6 @@ function getQueryValue(
 function parsePage(value: string): number {
   const parsed = Number.parseInt(value, 10);
   return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed;
-}
-
-function getLastMonthsBoundary(monthsBack: number): Date {
-  const boundary = new Date();
-  boundary.setHours(0, 0, 0, 0);
-  boundary.setMonth(boundary.getMonth() - monthsBack);
-  return boundary;
 }
 
 function buildTrainingsUrl(
@@ -96,8 +88,6 @@ export default async function TrainingsPage({
   }
 
   const queryLower = query.toLowerCase();
-  const fromBoundary = getLastMonthsBoundary(LAST_MONTHS_WINDOW);
-
   const filteredTrainings = trainings.filter((training) => {
     const searchable = [
       training.title,
@@ -119,10 +109,6 @@ export default async function TrainingsPage({
     if (Number.isNaN(start.getTime())) {
       return false;
     }
-    if (start < fromBoundary) {
-      return false;
-    }
-
     return true;
   });
 
@@ -143,8 +129,8 @@ export default async function TrainingsPage({
         </h1>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
           {canManageTrainings
-            ? `Teams trainings from the last ${LAST_MONTHS_WINDOW} months.`
-            : `Trainings assigned to you from the last ${LAST_MONTHS_WINDOW} months.`}
+            ? "All calendar meetings available from Graph."
+            : "Your assigned calendar meetings from Graph."}
         </p>
       </div>
 

@@ -35,6 +35,8 @@ type GraphAttendee = {
 
 type GraphEvent = {
   id?: string;
+  seriesMasterId?: string;
+  iCalUId?: string;
   subject?: string;
   body?: GraphItemBody;
   start?: GraphDateTime;
@@ -74,6 +76,57 @@ export type TrainingCardItem = {
   eventUrl: string | null;
 };
 
+function getSortableDateMs(value: string | null): number {
+  if (!value) {
+    return Number.MIN_SAFE_INTEGER;
+  }
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? Number.MIN_SAFE_INTEGER : time;
+}
+
+function mapDriveItemToMyFile(item: GraphDriveItem): MyFileItem | null {
+  const id = item.id?.trim();
+  if (!id) {
+    return null;
+  }
+  const name = item.name?.trim() || "Untitled";
+  const isFolder = Boolean(item.folder);
+  const mimeType = item.file?.mimeType?.trim() ?? null;
+  const lowerName = name.toLowerCase();
+  const isVideo =
+    !isFolder &&
+    (Boolean(mimeType && mimeType.startsWith("video/")) ||
+      [".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".wmv"].some((ext) =>
+        lowerName.endsWith(ext),
+      ));
+  return {
+    id,
+    name,
+    kind: isFolder ? "folder" : "file",
+    mimeType,
+    isVideo,
+    webUrl: item.webUrl ?? null,
+    downloadUrl: item["@microsoft.graph.downloadUrl"] ?? null,
+    modifiedAt: item.lastModifiedDateTime ?? item.createdDateTime ?? null,
+    size: typeof item.size === "number" ? item.size : null,
+    childCount: isFolder ? (item.folder?.childCount ?? null) : null,
+  };
+}
+
+function getKeywordScore(name: string, keywords: string[]): number {
+  if (keywords.length === 0) {
+    return 0;
+  }
+  const normalizedName = normalizeSubjectForFamilyMatch(name);
+  let score = 0;
+  for (const keyword of keywords) {
+    if (normalizedName.includes(keyword)) {
+      score += 1;
+    }
+  }
+  return score;
+}
+
 export type TrainingParticipant = {
   name: string | null;
   email: string | null;
@@ -89,7 +142,7 @@ export type TrainingRecordingItem = {
   timeZone: string | null;
   recordingUrl: string | null;
   eventUrl: string | null;
-  source: "teams_artifact" | "event_link";
+  source: "teams_artifact" | "event_link" | "drive_file";
 };
 
 export type TrainingDetails = {
@@ -155,7 +208,7 @@ export type UpdateMeetingInput = {
 
 export type TrainingDiagnostics = {
   onlineMeetingResolved: boolean;
-  recordingSource: "teams_artifact" | "event_link" | "none";
+  recordingSource: "teams_artifact" | "drive_file" | "event_link" | "none";
   participantSource: "attendance_report" | "call_records" | "event_attendees" | "none";
   onlineMeetingOwnerUserId: string | null;
   meetingResolutionAttempts: string[];
@@ -246,6 +299,70 @@ type GraphUser = {
   id?: string;
   userPrincipalName?: string;
   mail?: string;
+};
+
+type GraphDriveItem = {
+  id?: string;
+  name?: string;
+  webUrl?: string;
+  size?: number;
+  createdDateTime?: string;
+  lastModifiedDateTime?: string;
+  "@microsoft.graph.downloadUrl"?: string;
+  parentReference?: {
+    id?: string;
+  };
+  folder?: {
+    childCount?: number;
+  };
+  file?: {
+    mimeType?: string;
+  };
+};
+
+type GraphDriveSearchResponse = {
+  value?: GraphDriveItem[];
+  "@odata.nextLink"?: string;
+};
+
+type GraphDriveChildrenResponse = {
+  value?: GraphDriveItem[];
+  "@odata.nextLink"?: string;
+};
+
+type GraphDriveFolderMeta = {
+  id?: string;
+  name?: string;
+  parentReference?: {
+    id?: string;
+  };
+};
+
+export type MyFileItem = {
+  id: string;
+  name: string;
+  kind: "folder" | "file";
+  mimeType: string | null;
+  isVideo: boolean;
+  webUrl: string | null;
+  downloadUrl: string | null;
+  modifiedAt: string | null;
+  size: number | null;
+  childCount: number | null;
+};
+
+export type MyFilesResult = {
+  currentFolderId: string | null;
+  currentFolderName: string;
+  parentFolderId: string | null;
+  items: MyFileItem[];
+};
+
+export type TrainingRelatedFilesResult = {
+  trainingId: string;
+  trainingTitle: string;
+  items: MyFileItem[];
+  keywordHints: string[];
 };
 
 function getRequiredEnv(name: string): string {
@@ -601,9 +718,11 @@ function getIsoMonthsAgo(months: number): string {
 
 type FetchTrainingEventsOptions = {
   startFromIso?: string;
+  endAtIso?: string;
   maxPages?: number;
   top?: number;
   select?: string;
+  useCalendarView?: boolean;
 };
 
 async function fetchTrainingEvents(
@@ -613,13 +732,22 @@ async function fetchTrainingEvents(
   const { mailbox } = getGraphContext();
   const select =
     options.select ??
-    "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting";
+    "id,seriesMasterId,iCalUId,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting";
 
   const buildEventsUrl = (startFromIso?: string): string => {
     const params = new URLSearchParams();
     params.set("$top", String(options.top ?? 100));
-    params.set("$orderby", "start/dateTime desc");
     params.set("$select", select);
+
+    if (options.useCalendarView) {
+      params.set("startDateTime", startFromIso ?? getIsoMonthsAgo(24));
+      params.set("endDateTime", options.endAtIso ?? new Date().toISOString());
+      return `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        mailbox,
+      )}/calendarView?${params.toString()}`;
+    }
+
+    params.set("$orderby", "start/dateTime desc");
     if (startFromIso) {
       const safeStart = startFromIso.replace(/'/g, "''");
       params.set("$filter", `start/dateTime ge '${safeStart}'`);
@@ -660,7 +788,7 @@ async function fetchTrainingEvents(
   try {
     return await readPages(buildEventsUrl(options.startFromIso), maxPages);
   } catch (error) {
-    if (!options.startFromIso) {
+    if (!options.startFromIso || options.useCalendarView) {
       throw error;
     }
 
@@ -695,7 +823,7 @@ async function fetchTrainingEventById(
         mailbox,
       )}/events/${encodeURIComponent(
         trainingId,
-      )}?$select=id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting,body`,
+      )}?$select=id,seriesMasterId,iCalUId,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,onlineMeeting,body`,
     );
   } catch {
     return null;
@@ -739,7 +867,11 @@ async function resolveOnlineMeetingId(
     attempts.push(
       "No join URL on event (onlineMeeting.joinUrl/onlineMeetingUrl missing)",
     );
-    return { meetingId: null, ownerUserId: null, attempts };
+    return {
+      meetingId: null,
+      ownerUserId: candidateUsers[0] ?? null,
+      attempts,
+    };
   }
 
   const safeJoinUrl = joinUrl.replace(/'/g, "''");
@@ -830,6 +962,202 @@ function mapRecordingArtifactToItem(
     eventUrl: null,
     source: "teams_artifact",
   };
+}
+
+function normalizeForComparison(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function normalizeSubjectForFamilyMatch(value: string | null | undefined): string {
+  return normalizeForComparison(value)
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseIsoToMs(value: string | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+  const ms = new Date(value).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function getSubjectKeywords(subject: string | null | undefined): string[] {
+  const stopWords = new Set([
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "this",
+    "that",
+    "session",
+    "meeting",
+    "training",
+    "teams",
+    "aim",
+    "lms",
+  ]);
+  return Array.from(
+    new Set(
+      normalizeSubjectForFamilyMatch(subject)
+        .split(" ")
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 4 && !stopWords.has(token)),
+    ),
+  );
+}
+
+function isLikelyRecordingFile(item: GraphDriveItem): boolean {
+  const mime = normalizeForComparison(item.file?.mimeType);
+  const name = normalizeForComparison(item.name);
+  const videoExts = [".mp4", ".mkv", ".webm", ".mov", ".m4v"];
+  return (
+    mime.startsWith("video/") ||
+    videoExts.some((ext) => name.endsWith(ext)) ||
+    name.includes("recording")
+  );
+}
+
+function mapDriveItemToRecording(
+  ownerUserId: string,
+  item: GraphDriveItem,
+): TrainingRecordingItem | null {
+  const id = item.id?.trim();
+  if (!id) {
+    return null;
+  }
+
+  const time = item.createdDateTime ?? item.lastModifiedDateTime ?? null;
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+    ownerUserId,
+  )}/drive/items/${encodeURIComponent(id)}/content`;
+  return {
+    id: `drive-${id}`,
+    title: item.name?.trim() || "Recording File",
+    startDateTime: time,
+    endDateTime: null,
+    timeZone: "UTC",
+    recordingUrl: url,
+    eventUrl: item.webUrl ?? null,
+    source: "drive_file",
+  };
+}
+
+async function fetchDriveRecordingFiles(
+  token: string,
+  ownerUserId: string,
+  trainingEvent: GraphEvent,
+): Promise<{ recordings: TrainingRecordingItem[]; error: string | null }> {
+  const keywords = getSubjectKeywords(trainingEvent.subject);
+  const selectedStartMs = parseIsoToMs(trainingEvent.start?.dateTime ?? null);
+  const minMs =
+    selectedStartMs === null ? null : selectedStartMs - 1000 * 60 * 60 * 24 * 730;
+  const maxMs =
+    selectedStartMs === null ? null : selectedStartMs + 1000 * 60 * 60 * 24 * 30;
+
+  const matched: TrainingRecordingItem[] = [];
+  const seenIds = new Set<string>();
+
+  const considerItem = (item: GraphDriveItem, requireKeywordMatch: boolean): void => {
+    const mapped = mapDriveItemToRecording(ownerUserId, item);
+    if (!mapped) {
+      return;
+    }
+    if (seenIds.has(mapped.id)) {
+      return;
+    }
+    if (!isLikelyRecordingFile(item)) {
+      return;
+    }
+
+    const nameNorm = normalizeForComparison(item.name);
+    const hasKeywordMatch =
+      keywords.length === 0 || keywords.some((keyword) => nameNorm.includes(keyword));
+    if (requireKeywordMatch && !hasKeywordMatch) {
+      return;
+    }
+
+    const fileMs = parseIsoToMs(mapped.startDateTime);
+    if (minMs !== null && maxMs !== null && fileMs !== null) {
+      if (fileMs < minMs || fileMs > maxMs) {
+        return;
+      }
+    }
+
+    seenIds.add(mapped.id);
+    matched.push(mapped);
+  };
+
+  try {
+    // Strategy 1: indexed search (fast) with subject keyword guard.
+    const params = new URLSearchParams();
+    params.set("$top", "200");
+    let nextUrl: string | null = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/drive/root/search(q='recording')?${params.toString()}`;
+    let pages = 0;
+    while (nextUrl && pages < 10) {
+      const page: GraphDriveSearchResponse = await graphGet<GraphDriveSearchResponse>(
+        token,
+        nextUrl,
+      );
+      for (const item of page.value ?? []) {
+        considerItem(item, true);
+      }
+      nextUrl = page["@odata.nextLink"] ?? null;
+      pages += 1;
+    }
+
+    // Strategy 2: direct folder crawl where Teams usually stores recordings.
+    // This handles cases where search indexing misses files.
+    const rootPaths = ["Recordings", "Microsoft Teams Chat Files", "Meetings"];
+    for (const rootPath of rootPaths) {
+      const rootUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        ownerUserId,
+      )}/drive/root:/${encodeURIComponent(rootPath)}:/children?$top=200`;
+      try {
+        const queue: Array<{ url: string; depth: number }> = [{ url: rootUrl, depth: 0 }];
+        while (queue.length > 0) {
+          const current = queue.shift();
+          if (!current) {
+            continue;
+          }
+          const page: GraphDriveChildrenResponse = await graphGet<GraphDriveChildrenResponse>(
+            token,
+            current.url,
+          );
+          for (const item of page.value ?? []) {
+            if (item.folder?.childCount && current.depth < 3 && item.id) {
+              queue.push({
+                url: `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+                  ownerUserId,
+                )}/drive/items/${encodeURIComponent(item.id)}/children?$top=200`,
+                depth: current.depth + 1,
+              });
+            } else {
+              // Folder-crawl matches are trusted; keyword can be missing in filenames.
+              considerItem(item, false);
+            }
+          }
+          const next = page["@odata.nextLink"] ?? null;
+          if (next) {
+            queue.push({ url: next, depth: current.depth });
+          }
+        }
+      } catch {
+        // Ignore missing folders and continue with other known roots.
+      }
+    }
+
+    return { recordings: matched, error: null };
+  } catch (error) {
+    return {
+      recordings: matched,
+      error: error instanceof Error ? error.message : "Unknown drive search error",
+    };
+  }
 }
 
 async function fetchMeetingRecordings(
@@ -1068,13 +1396,232 @@ async function fetchParticipantsFromCallRecords(
   }
 }
 
+export async function fetchMyFiles(folderId?: string): Promise<MyFilesResult> {
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const normalizedFolderId = folderId?.trim() || null;
+  const items: MyFileItem[] = [];
+  const seenIds = new Set<string>();
+
+  let nextUrl = normalizedFolderId
+    ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        ownerUserId,
+      )}/drive/items/${encodeURIComponent(
+        normalizedFolderId,
+      )}/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`
+    : `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+        ownerUserId,
+      )}/drive/root/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`;
+
+  let pageCount = 0;
+  while (nextUrl && pageCount < 10) {
+    const page: GraphDriveChildrenResponse = await graphGet<GraphDriveChildrenResponse>(
+      token,
+      nextUrl,
+    );
+    for (const raw of page.value ?? []) {
+      const mapped = mapDriveItemToMyFile(raw);
+      if (!mapped || seenIds.has(mapped.id)) {
+        continue;
+      }
+      seenIds.add(mapped.id);
+      items.push(mapped);
+    }
+    nextUrl = page["@odata.nextLink"] ?? "";
+    pageCount += 1;
+  }
+
+  let currentFolderName = "My Files";
+  let parentFolderId: string | null = null;
+  if (normalizedFolderId) {
+    try {
+      const folderMeta = await graphGet<GraphDriveFolderMeta>(
+        token,
+        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+          ownerUserId,
+        )}/drive/items/${encodeURIComponent(
+          normalizedFolderId,
+        )}?$select=id,name,parentReference`,
+      );
+      currentFolderName = folderMeta.name?.trim() || "Folder";
+      parentFolderId = folderMeta.parentReference?.id?.trim() || null;
+    } catch {
+      currentFolderName = "Folder";
+      parentFolderId = null;
+    }
+  }
+
+  items.sort((a, b) => {
+    if (a.kind !== b.kind) {
+      return a.kind === "folder" ? -1 : 1;
+    }
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+
+  return {
+    currentFolderId: normalizedFolderId,
+    currentFolderName,
+    parentFolderId,
+    items,
+  };
+}
+
+export async function fetchMyFileById(itemId: string): Promise<MyFileItem> {
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const normalizedItemId = itemId.trim();
+  if (!normalizedItemId) {
+    throw new Error("Invalid file id");
+  }
+
+  const raw = await graphGet<GraphDriveItem>(
+    token,
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+      ownerUserId,
+    )}/drive/items/${encodeURIComponent(
+      normalizedItemId,
+    )}?$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`,
+  );
+  const mapped = mapDriveItemToMyFile(raw);
+  if (!mapped) {
+    throw new Error("File not found");
+  }
+  return mapped;
+}
+
+export async function fetchTrainingRelatedMyFiles(
+  trainingId: string,
+  viewer?: TrainingViewerContext,
+): Promise<TrainingRelatedFilesResult> {
+  const token = await getMicrosoftGraphAccessToken();
+  const ownerUserId = getTargetMailbox();
+  const trainingEvent = await fetchTrainingEventById(token, ownerUserId, trainingId);
+  if (!trainingEvent) {
+    throw new Error("Training not found");
+  }
+  if (!canViewerAccessEvent(viewer, trainingEvent)) {
+    throw new Error("Forbidden");
+  }
+
+  const training = mapEventToTraining(trainingEvent);
+  if (!training) {
+    throw new Error("Invalid training payload");
+  }
+
+  const keywordHints = getSubjectKeywords(trainingEvent.subject);
+  const folderSeeds = ["Recordings", "Microsoft Teams Chat Files", "Meetings"];
+  const queue: Array<{ folderId: string; depth: number }> = [];
+  const visitedFolders = new Set<string>();
+
+  for (const seed of folderSeeds) {
+    try {
+      const folderMeta = await graphGet<GraphDriveItem>(
+        token,
+        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+          ownerUserId,
+        )}/drive/root:/${encodeURIComponent(seed)}?$select=id,name,folder`,
+      );
+      const seedId = folderMeta.id?.trim();
+      if (seedId) {
+        queue.push({ folderId: seedId, depth: 0 });
+      }
+    } catch {
+      // Ignore missing seed folders.
+    }
+  }
+
+  if (queue.length === 0) {
+    queue.push({ folderId: "root", depth: 0 });
+  }
+
+  const scoredItems: Array<{ item: MyFileItem; score: number; modifiedMs: number }> = [];
+  let scannedPages = 0;
+  while (queue.length > 0 && scannedPages < 60) {
+    const next = queue.shift();
+    if (!next) {
+      continue;
+    }
+    if (visitedFolders.has(next.folderId)) {
+      continue;
+    }
+    visitedFolders.add(next.folderId);
+
+    let nextUrl =
+      next.folderId === "root"
+        ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+            ownerUserId,
+          )}/drive/root/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`
+        : `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+            ownerUserId,
+          )}/drive/items/${encodeURIComponent(
+            next.folderId,
+          )}/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`;
+
+    let pageCountForFolder = 0;
+    while (nextUrl && pageCountForFolder < 6 && scannedPages < 60) {
+      const page: GraphDriveChildrenResponse = await graphGet<GraphDriveChildrenResponse>(
+        token,
+        nextUrl,
+      );
+      for (const raw of page.value ?? []) {
+        const mapped = mapDriveItemToMyFile(raw);
+        if (!mapped) {
+          continue;
+        }
+
+        const score = getKeywordScore(mapped.name, keywordHints);
+        if (score > 0) {
+          const modifiedMs = parseIsoToMs(mapped.modifiedAt) ?? 0;
+          scoredItems.push({ item: mapped, score, modifiedMs });
+        }
+
+        if (mapped.kind === "folder" && next.depth < 3) {
+          queue.push({ folderId: mapped.id, depth: next.depth + 1 });
+        }
+      }
+
+      nextUrl = page["@odata.nextLink"] ?? "";
+      pageCountForFolder += 1;
+      scannedPages += 1;
+    }
+  }
+
+  const deduped = new Map<string, { item: MyFileItem; score: number; modifiedMs: number }>();
+  for (const entry of scoredItems) {
+    const existing = deduped.get(entry.item.id);
+    if (!existing || entry.score > existing.score) {
+      deduped.set(entry.item.id, entry);
+    }
+  }
+
+  const items = Array.from(deduped.values())
+    .sort((a, b) => {
+      if (a.item.kind !== b.item.kind) {
+        return a.item.kind === "folder" ? -1 : 1;
+      }
+      if (a.score !== b.score) {
+        return b.score - a.score;
+      }
+      return b.modifiedMs - a.modifiedMs;
+    })
+    .slice(0, 120)
+    .map((entry) => entry.item);
+
+  return {
+    trainingId: training.id,
+    trainingTitle: training.title,
+    items,
+    keywordHints,
+  };
+}
+
 export async function fetchTeamsTrainings(
   viewer?: TrainingViewerContext,
 ): Promise<TrainingCardItem[]> {
   const needsAttendees = !isPrivilegedRole(viewer?.role ?? null);
   const events = await fetchTrainingEvents({
-    startFromIso: getIsoMonthsAgo(4),
-    maxPages: 6,
+    // List all available calendar meetings, not only a recent window.
+    maxPages: 20,
     top: 100,
     select: needsAttendees
       ? "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,organizer,attendees,body"
@@ -1082,9 +1629,11 @@ export async function fetchTeamsTrainings(
   });
   return events
     .filter((event) => canViewerAccessEvent(viewer, event))
-    .filter((event) => event.isOnlineMeeting || Boolean(event.onlineMeetingUrl))
     .map(mapEventToTraining)
-    .filter((event): event is TrainingCardItem => Boolean(event));
+    .filter((event): event is TrainingCardItem => Boolean(event))
+    .sort(
+      (a, b) => getSortableDateMs(b.startDateTime) - getSortableDateMs(a.startDateTime),
+    );
 }
 
 export async function fetchTrainingDetails(
@@ -1107,7 +1656,14 @@ export async function fetchTrainingDetails(
     throw new Error("Invalid training payload");
   }
 
-  const normalizedSubject = (trainingEvent.subject ?? "").trim().toLowerCase();
+  const normalizedSubject = normalizeForComparison(trainingEvent.subject);
+  const normalizedSubjectFamily = normalizeSubjectForFamilyMatch(trainingEvent.subject);
+  const selectedSeriesMasterId = trainingEvent.seriesMasterId?.trim() ?? null;
+  const selectedICalUId = normalizeForComparison(trainingEvent.iCalUId);
+  const selectedJoinUrl = normalizeForComparison(
+    trainingEvent.onlineMeeting?.joinUrl ?? trainingEvent.onlineMeetingUrl,
+  );
+  const selectedEventAccessible = canViewerAccessEvent(viewer, trainingEvent);
   const onlineMeetingResolution = await resolveOnlineMeetingId(
     token,
     mailbox,
@@ -1149,40 +1705,116 @@ export async function fetchTrainingDetails(
     );
   }
 
-  let fallbackEventRecordings: TrainingRecordingItem[] = [];
-  if (artifactRecordings.length === 0) {
-    const relatedEvents = await fetchTrainingEvents({
-      startFromIso: getIsoMonthsAgo(6),
-      maxPages: 4,
-      top: 60,
-      select: "id,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting",
-    });
-    fallbackEventRecordings = relatedEvents
-      .filter((event) => {
-        const sameSubject =
-          (event.subject ?? "").trim().toLowerCase() === normalizedSubject;
-        return sameSubject && isPastEvent(event) && canViewerAccessEvent(viewer, event);
-      })
-      .map(mapEventToRecording)
-      .filter((event): event is TrainingRecordingItem => Boolean(event))
-      .sort((a, b) => {
-        const aTime = a.startDateTime ? new Date(a.startDateTime).getTime() : 0;
-        const bTime = b.startDateTime ? new Date(b.startDateTime).getTime() : 0;
-        return bTime - aTime;
-      });
+  const driveRecordingsResult = await fetchDriveRecordingFiles(
+    token,
+    onlineMeetingOwnerUserId ?? mailbox,
+    trainingEvent,
+  );
+  const driveRecordings = driveRecordingsResult.recordings;
+  if (driveRecordingsResult.error) {
+    warnings.push(
+      `Drive recording fallback failed. Check Files.Read.All/Sites.Read.All permissions. Details: ${driveRecordingsResult.error}`,
+    );
   }
 
-  const recordings =
-    artifactRecordings.length > 0 ? artifactRecordings : fallbackEventRecordings;
+  const relatedEvents = await fetchTrainingEvents({
+    // Use calendarView so recurring instances are expanded and discoverable.
+    startFromIso: getIsoMonthsAgo(24),
+    endAtIso: new Date().toISOString(),
+    useCalendarView: true,
+    maxPages: 20,
+    top: 100,
+    select:
+      "id,seriesMasterId,iCalUId,subject,start,end,webLink,onlineMeetingUrl,isOnlineMeeting,onlineMeeting,organizer,attendees,body",
+  });
+  const fallbackScanCount = relatedEvents.length;
+  let matchedLineageCount = 0;
+  let accessibleSiblingCount = 0;
+  const fallbackEventRecordings = relatedEvents
+    .filter((event) => {
+      const eventSeriesMasterId = event.seriesMasterId?.trim() ?? null;
+      const sameSeries =
+        Boolean(selectedSeriesMasterId) &&
+        (eventSeriesMasterId === selectedSeriesMasterId ||
+          event.id?.trim() === selectedSeriesMasterId ||
+          eventSeriesMasterId === trainingEvent.id?.trim());
+
+      const eventICalUId = normalizeForComparison(event.iCalUId);
+      const sameICal = Boolean(selectedICalUId) && eventICalUId === selectedICalUId;
+
+      const eventJoinUrl = normalizeForComparison(
+        event.onlineMeeting?.joinUrl ?? event.onlineMeetingUrl,
+      );
+      const sameJoinUrl = Boolean(selectedJoinUrl) && eventJoinUrl === selectedJoinUrl;
+
+      const eventSubject = normalizeForComparison(event.subject);
+      const sameSubject = eventSubject === normalizedSubject;
+      const eventSubjectFamily = normalizeSubjectForFamilyMatch(event.subject);
+      const sameSubjectFamily =
+        normalizedSubjectFamily.length >= 8 &&
+        eventSubjectFamily.length >= 8 &&
+        (normalizedSubjectFamily.includes(eventSubjectFamily) ||
+          eventSubjectFamily.includes(normalizedSubjectFamily));
+
+      const matchesLineage =
+        sameSeries || sameICal || sameJoinUrl || sameSubject || sameSubjectFamily;
+      if (!matchesLineage) {
+        return false;
+      }
+      matchedLineageCount += 1;
+
+      // If the selected event is accessible, allow lineage-matched sibling events
+      // even when attendee metadata is missing on those sibling instances.
+      const canIncludeSibling =
+        isPrivilegedRole(viewer?.role ?? null) ||
+        canViewerAccessEvent(viewer, event) ||
+        selectedEventAccessible;
+      if (!canIncludeSibling) {
+        return false;
+      }
+      accessibleSiblingCount += 1;
+
+      return (
+        isPastEvent(event) &&
+        canIncludeSibling
+      );
+    })
+    .map(mapEventToRecording)
+    .filter((event): event is TrainingRecordingItem => Boolean(event));
+
+  const recordingMap = new Map<string, TrainingRecordingItem>();
+  for (const recording of [
+    ...artifactRecordings,
+    ...driveRecordings,
+    ...fallbackEventRecordings,
+  ]) {
+    if (!recordingMap.has(recording.id)) {
+      recordingMap.set(recording.id, recording);
+    }
+  }
+  const recordings = Array.from(recordingMap.values()).sort((a, b) => {
+    const aTime = a.startDateTime ? new Date(a.startDateTime).getTime() : 0;
+    const bTime = b.startDateTime ? new Date(b.startDateTime).getTime() : 0;
+    return bTime - aTime;
+  });
   if (recordings.length === 0) {
     warnings.push(
       "No recordings found from Teams artifacts or past event links for this training.",
     );
-  } else if (artifactRecordings.length === 0 && fallbackEventRecordings.length > 0) {
-    warnings.push(
-      "Using fallback event links instead of Teams recording artifacts. Grant OnlineMeetingArtifact.Read.All for direct recording artifacts.",
-    );
+  } else if (artifactRecordings.length === 0) {
+    if (driveRecordings.length > 0) {
+      warnings.push(
+        "Using Drive/chat recording files fallback because Teams recording artifacts are unavailable.",
+      );
+    } else if (fallbackEventRecordings.length > 0) {
+      warnings.push(
+        "Using fallback event links instead of Teams recording artifacts. Grant OnlineMeetingArtifact.Read.All for direct recording artifacts.",
+      );
+    }
   }
+  warnings.push(
+    `Fallback scan stats: scanned=${fallbackScanCount}, lineageMatched=${matchedLineageCount}, accessEligible=${accessibleSiblingCount}, driveRecordings=${driveRecordings.length}, fallbackRecordings=${fallbackEventRecordings.length}, mergedRecordings=${recordings.length}`,
+  );
 
   const attendanceParticipants = attendanceResult.participants;
   if (attendanceResult.error) {
@@ -1231,6 +1863,8 @@ export async function fetchTrainingDetails(
     recordingSource:
       artifactRecordings.length > 0
         ? "teams_artifact"
+        : driveRecordings.length > 0
+        ? "drive_file"
         : fallbackEventRecordings.length > 0
         ? "event_link"
         : "none",

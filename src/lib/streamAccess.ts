@@ -6,7 +6,7 @@ type StreamTokenPayload = {
   clientFingerprint: string;
   trainingId: string;
   recordingId: string;
-  recordingSource: "teams_artifact" | "event_link";
+  recordingSource: "teams_artifact" | "drive_file" | "event_link";
   recordingUrl: string;
   expiresAt: number;
 };

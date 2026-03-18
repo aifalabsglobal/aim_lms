@@ -38,6 +38,8 @@ const navItems: NavItem[] = [
     icon: <ListIcon />,
     subItems: [
       { name: "All Trainings", path: "/trainings", pro: false },
+      { name: "My Files", path: "/my-files", pro: false },
+      { name: "Recordings", path: "/trainings", pro: false },
       { name: "Create Training", path: "/trainings/create", pro: false },
       { name: "Categories", path: "/trainings/categories", pro: false },
       { name: "Batches/Sessions", path: "/trainings/sessions", pro: false },
@@ -97,7 +99,10 @@ const learnerNavItems: NavItem[] = [
   {
     name: "Trainings",
     icon: <ListIcon />,
-    subItems: [{ name: "My Trainings", path: "/trainings", pro: false }],
+    subItems: [
+      { name: "My Trainings", path: "/trainings", pro: false },
+      { name: "Recordings", path: "/trainings", pro: false },
+    ],
   },
 ];
 const noNavItems: NavItem[] = [];
@@ -272,8 +277,6 @@ const AppSidebar: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Check if the current path matches any submenu item
-    let submenuMatched = false;
     ["main", "others"].forEach((menuType) => {
       const items = menuType === "main" ? activeMainItems : activeOtherItems;
       items.forEach((nav, index) => {
@@ -284,17 +287,11 @@ const AppSidebar: React.FC = () => {
                 type: menuType as "main" | "others",
                 index,
               });
-              submenuMatched = true;
             }
           });
         }
       });
     });
-
-    // If no submenu item matches, close the open submenu
-    if (!submenuMatched) {
-      setOpenSubmenu(null);
-    }
   }, [pathname, isActive, activeMainItems, activeOtherItems]);
 
   useEffect(() => {

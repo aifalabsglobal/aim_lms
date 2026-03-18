@@ -107,7 +107,8 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
         </div>
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
-          {details.recording.source === "teams_artifact" &&
+          {(details.recording.source === "teams_artifact" ||
+            details.recording.source === "drive_file") &&
           details.recording.recordingUrl ? (
             <video
               controls
@@ -122,7 +123,8 @@ export default async function RecordingPage({ params }: RecordingPageProps) {
             <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
               This recording host blocks in-app embedding (for example,
               `outlook.office365.com` can refuse iframe connections). For
-              view-only access, open trainings that expose `teams_artifact`
+              view-only access, open trainings that expose `teams_artifact` or
+              `drive_file`
               streams.
             </div>
           )}

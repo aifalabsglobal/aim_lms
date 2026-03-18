@@ -51,7 +51,9 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
   const role = appUser.role?.toLowerCase() ?? "";
   const isPrivileged = role === "admin" || role === "super_admin";
   const resolvedParams = await params;
-  const resolvedSearchParams = await (searchParams ?? Promise.resolve({}));
+  const resolvedSearchParams: { q?: string; view?: string } = searchParams
+    ? await searchParams
+    : {};
   const folderId = resolvedParams.folder?.[0]
     ? decodeURIComponent(resolvedParams.folder[0])
     : undefined;

@@ -18,6 +18,8 @@ model User {
   courses     Course[]     @relation("TutorCourses")
   enrollments Enrollment[] @relation("StudentEnrollments")
   accessRequests RecordingAccessRequest[]
+  presence    UserPresence?
+  notificationState UserNotificationState?
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -97,5 +99,26 @@ model RecordingAccessRequest {
 
   @@unique([userId, courseFolderId])
   @@index([status, requestedAt])
+}
+
+model UserPresence {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentPath String?
+  userAgent  String?
+  firstSeenAt DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([lastSeenAt])
+}
+
+model UserNotificationState {
+  id         String   @id @default(cuid())
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastReadAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 

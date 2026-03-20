@@ -1,11 +1,10 @@
 import React from "react";
-import AdminComingSoon from "@/components/common/AdminComingSoon";
+import LearnerAnalyticsPanel from "@/components/analytics/LearnerAnalyticsPanel";
+import { requireRole } from "@/lib/auth";
 
-export default function DashboardActivityPage() {
-  return (
-    <AdminComingSoon
-      title="Activity Timeline"
-      description="Track recent admin, trainer, and learner activity in one place."
-    />
-  );
+export const dynamic = "force-dynamic";
+
+export default async function DashboardActivityPage() {
+  await requireRole(["ADMIN", "SUPER_ADMIN"]);
+  return <LearnerAnalyticsPanel />;
 }

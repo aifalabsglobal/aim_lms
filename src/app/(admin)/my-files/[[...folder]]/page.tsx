@@ -1,4 +1,6 @@
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
+import FlowBreadcrumb from "@/components/common/FlowBreadcrumb";
+import LockedPreviewHelp from "@/components/my-files/LockedPreviewHelp";
 import { requireAppUser } from "@/lib/auth";
 import { fetchMyFiles, isCourseFolderUnlockedForViewer } from "@/lib/graph";
 
@@ -166,6 +168,13 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
 
   return (
     <div className="space-y-6">
+      <FlowBreadcrumb
+        items={[
+          { label: "Trainings", href: "/trainings" },
+          { label: "My Files", href: "/my-files" },
+          ...(files.currentFolderId ? [{ label: files.currentFolderName }] : []),
+        ]}
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
@@ -289,12 +298,17 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
                     Open Folder
                   </ProgressNavLink>
                 ) : isItemLocked(item) ? (
-                  <span className="inline-flex items-center rounded-lg border border-warning-300 bg-warning-50 px-3 py-1.5 text-xs font-medium text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200">
-                    Locked
-                  </span>
+                  <div className="inline-flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-lg border border-warning-300 bg-warning-50 px-3 py-1.5 text-xs font-medium text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200">
+                      Locked
+                    </span>
+                    <LockedPreviewHelp />
+                  </div>
                 ) : (
                   <ProgressNavLink
-                    href={`/my-files/file/${encodeURIComponent(item.id)}`}
+                    href={`/my-files/file/${encodeURIComponent(item.id)}?returnTo=${encodeURIComponent(
+                      withQuery(currentPath, { query: rawQuery || undefined, view: viewMode }),
+                    )}`}
                     className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600"
                   >
                     {item.isVideo ? "Play Video" : "Open File"}
@@ -346,12 +360,17 @@ export default async function MyFilesPage({ params, searchParams }: MyFilesPageP
                     Open Folder
                   </ProgressNavLink>
                 ) : isItemLocked(item) ? (
-                  <span className="inline-flex items-center rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs font-medium text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200">
-                    Locked
-                  </span>
+                  <div className="inline-flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-lg border border-warning-300 bg-warning-50 px-3 py-2 text-xs font-medium text-warning-700 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-200">
+                      Locked
+                    </span>
+                    <LockedPreviewHelp />
+                  </div>
                 ) : (
                   <ProgressNavLink
-                    href={`/my-files/file/${encodeURIComponent(item.id)}`}
+                    href={`/my-files/file/${encodeURIComponent(item.id)}?returnTo=${encodeURIComponent(
+                      withQuery(currentPath, { query: rawQuery || undefined, view: viewMode }),
+                    )}`}
                     className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-medium text-white hover:bg-brand-600"
                   >
                     {item.isVideo ? "Play Video" : "Open File"}

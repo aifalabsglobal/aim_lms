@@ -16,6 +16,11 @@ type AccessRequestRow = {
   reviewedAt: string | null;
 };
 
+type FeedbackState = {
+  kind: "success" | "error";
+  message: string;
+} | null;
+
 function statusClassName(status: AccessRequestRow["status"]): string {
   if (status === "APPROVED") {
     return "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300";
@@ -33,6 +38,7 @@ export default function RequestTrainingAccessForm({
   const [selectedFolderId, setSelectedFolderId] = useState(courses[0]?.id ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -45,6 +51,14 @@ export default function RequestTrainingAccessForm({
       setSelectedFolderId(selectedFolderIdProp);
     }
   }, [courses, selectedFolderIdProp]);
+
+  useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+    const timer = window.setTimeout(() => setFeedback(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
 
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedFolderId) ?? null,
@@ -74,6 +88,7 @@ export default function RequestTrainingAccessForm({
 
     setIsSubmitting(true);
     setError(null);
+    setFeedback(null);
     try {
       const response = await fetch("/api/trainings/access-requests", {
         method: "POST",
@@ -89,8 +104,11 @@ export default function RequestTrainingAccessForm({
       }
       setRequests(data.requests ?? []);
       setLoaded(true);
+      setFeedback({ kind: "success", message: "Access request submitted successfully." });
     } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Failed to submit request");
+      const message = submitError instanceof Error ? submitError.message : "Failed to submit request";
+      setError(message);
+      setFeedback({ kind: "error", message });
     } finally {
       setIsSubmitting(false);
     }
@@ -139,6 +157,17 @@ export default function RequestTrainingAccessForm({
       {error && (
         <div className="rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
           {error}
+        </div>
+      )}
+      {feedback && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            feedback.kind === "success"
+              ? "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300"
+              : "border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300"
+          }`}
+        >
+          {feedback.message}
         </div>
       )}
 

@@ -1,4 +1,5 @@
 import ProgressNavLink from "@/components/trainings/ProgressNavLink";
+import FlowBreadcrumb from "@/components/common/FlowBreadcrumb";
 import { requireAppUser } from "@/lib/auth";
 import { fetchMyFileById } from "@/lib/graph";
 
@@ -6,6 +7,7 @@ export const dynamic = "force-dynamic";
 
 type MyFileViewPageProps = {
   params: Promise<{ itemId: string }>;
+  searchParams?: Promise<{ returnTo?: string }>;
 };
 
 function formatDate(value: string | null): string {
@@ -26,9 +28,12 @@ function formatDate(value: string | null): string {
   }).format(date);
 }
 
-export default async function MyFileViewPage({ params }: MyFileViewPageProps) {
+export default async function MyFileViewPage({ params, searchParams }: MyFileViewPageProps) {
   const appUser = await requireAppUser();
   const { itemId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : {};
+  const returnTo = resolvedSearchParams.returnTo?.trim() ?? "";
+  const backHref = returnTo.startsWith("/my-files") ? returnTo : "/my-files";
   const decodedItemId = decodeURIComponent(itemId);
   const file = await fetchMyFileById(decodedItemId, {
     email: appUser.email ?? null,
@@ -50,6 +55,13 @@ export default async function MyFileViewPage({ params }: MyFileViewPageProps) {
 
   return (
     <div className="space-y-6">
+      <FlowBreadcrumb
+        items={[
+          { label: "Trainings", href: "/trainings" },
+          { label: "My Files", href: backHref },
+          { label: file.name },
+        ]}
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">
@@ -60,7 +72,7 @@ export default async function MyFileViewPage({ params }: MyFileViewPageProps) {
           </p>
         </div>
         <ProgressNavLink
-          href="/my-files"
+          href={backHref}
           className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
         >
           Back to My Files

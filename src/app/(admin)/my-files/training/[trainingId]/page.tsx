@@ -134,7 +134,9 @@ export default async function TrainingRelatedFilesPage({
                   </ProgressNavLink>
                 ) : (
                   <ProgressNavLink
-                    href={`/my-files/file/${encodeURIComponent(item.id)}`}
+                    href={`/my-files/file/${encodeURIComponent(item.id)}?returnTo=${encodeURIComponent(
+                      `/my-files/training/${encodeURIComponent(related.trainingId)}`,
+                    )}`}
                     className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-medium text-white hover:bg-brand-600"
                   >
                     {item.isVideo ? "Play Video" : "Open File"}

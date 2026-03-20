@@ -30,7 +30,7 @@ export const DropdownItem: React.FC<DropdownItemProps> = ({
     if (onItemClick) onItemClick();
   };
 
-  if (tag === "a" && href) {
+  if (href) {
     return (
       <Link href={href} className={combinedClasses} onClick={handleClick}>
         {children}
@@ -39,7 +39,7 @@ export const DropdownItem: React.FC<DropdownItemProps> = ({
   }
 
   return (
-    <button onClick={handleClick} className={combinedClasses}>
+    <button type="button" onClick={handleClick} className={combinedClasses}>
       {children}
     </button>
   );

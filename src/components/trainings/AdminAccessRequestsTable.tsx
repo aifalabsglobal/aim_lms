@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type AccessRequestRow = {
   id: string;
@@ -18,6 +18,11 @@ type AccessRequestRow = {
     status: string;
   };
 };
+
+type FeedbackState = {
+  kind: "success" | "error";
+  message: string;
+} | null;
 
 function statusBadge(status: AccessRequestRow["status"], hasAccess: boolean): string {
   if (hasAccess) {
@@ -37,6 +42,12 @@ export default function AdminAccessRequestsTable() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isBulkSaving, setIsBulkSaving] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | AccessRequestRow["status"]>("all");
+  const [accessFilter, setAccessFilter] = useState<"all" | "has_access" | "needs_access">("all");
 
   async function load() {
     setIsLoading(true);
@@ -48,6 +59,7 @@ export default function AdminAccessRequestsTable() {
         throw new Error(data.message ?? "Failed to load access requests");
       }
       setRows(data.requests ?? []);
+      setSelectedIds((current) => current.filter((id) => (data.requests ?? []).some((row) => row.id === id)));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load access requests");
     } finally {
@@ -59,9 +71,18 @@ export default function AdminAccessRequestsTable() {
     load();
   }, []);
 
+  useEffect(() => {
+    if (!feedback) {
+      return;
+    }
+    const timer = window.setTimeout(() => setFeedback(null), 3500);
+    return () => window.clearTimeout(timer);
+  }, [feedback]);
+
   async function approveRequest(requestId: string) {
     setActiveId(requestId);
     setError(null);
+    setFeedback(null);
     try {
       const response = await fetch(
         `/api/admin/recordings/access-requests/${encodeURIComponent(requestId)}/approve`,
@@ -72,8 +93,11 @@ export default function AdminAccessRequestsTable() {
         throw new Error(data.message ?? "Failed to approve access");
       }
       await load();
+      setFeedback({ kind: "success", message: "Access approved successfully." });
     } catch (approveError) {
-      setError(approveError instanceof Error ? approveError.message : "Failed to approve access");
+      const message = approveError instanceof Error ? approveError.message : "Failed to approve access";
+      setError(message);
+      setFeedback({ kind: "error", message });
     } finally {
       setActiveId(null);
     }
@@ -82,6 +106,7 @@ export default function AdminAccessRequestsTable() {
   async function revokeRequest(requestId: string) {
     setActiveId(requestId);
     setError(null);
+    setFeedback(null);
     try {
       const response = await fetch(
         `/api/admin/recordings/access-requests/${encodeURIComponent(requestId)}/revoke`,
@@ -92,10 +117,108 @@ export default function AdminAccessRequestsTable() {
         throw new Error(data.message ?? "Failed to revoke access");
       }
       await load();
+      setFeedback({ kind: "success", message: "Access revoked successfully." });
     } catch (revokeError) {
-      setError(revokeError instanceof Error ? revokeError.message : "Failed to revoke access");
+      const message = revokeError instanceof Error ? revokeError.message : "Failed to revoke access";
+      setError(message);
+      setFeedback({ kind: "error", message });
     } finally {
       setActiveId(null);
+    }
+  }
+
+  const filteredRows = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (statusFilter !== "all" && row.status !== statusFilter) {
+        return false;
+      }
+      if (accessFilter === "has_access" && !row.hasAccess) {
+        return false;
+      }
+      if (accessFilter === "needs_access" && row.hasAccess) {
+        return false;
+      }
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      const userName = row.user.name?.toLowerCase() ?? "";
+      const userEmail = row.user.email?.toLowerCase() ?? "";
+      const courseName = row.courseName.toLowerCase();
+      const userStatus = row.user.status.toLowerCase();
+
+      return (
+        userName.includes(normalizedSearch) ||
+        userEmail.includes(normalizedSearch) ||
+        courseName.includes(normalizedSearch) ||
+        userStatus.includes(normalizedSearch)
+      );
+    });
+  }, [accessFilter, rows, searchTerm, statusFilter]);
+
+  const hasActiveFilters = searchTerm.trim().length > 0 || statusFilter !== "all" || accessFilter !== "all";
+  const filteredRowIds = filteredRows.map((row) => row.id);
+  const selectedFilteredIds = selectedIds.filter((id) => filteredRowIds.includes(id));
+  const selectedFilteredRows = filteredRows.filter((row) => selectedFilteredIds.includes(row.id));
+  const canBulkRevoke = selectedFilteredRows.some((row) => row.hasAccess);
+
+  async function runBulkAction(action: "approve" | "revoke") {
+    if (selectedFilteredIds.length === 0) {
+      return;
+    }
+    setIsBulkSaving(true);
+    setError(null);
+    setFeedback(null);
+    try {
+      const targets =
+        action === "revoke"
+          ? filteredRows.filter((row) => selectedFilteredIds.includes(row.id) && row.hasAccess)
+          : filteredRows.filter((row) => selectedFilteredIds.includes(row.id));
+      if (targets.length === 0) {
+        setFeedback({
+          kind: "error",
+          message: action === "revoke" ? "Select at least one row with access to revoke." : "No rows selected.",
+        });
+        return;
+      }
+
+      const settled = await Promise.allSettled(
+        targets.map((row) =>
+          fetch(
+            `/api/admin/recordings/access-requests/${encodeURIComponent(row.id)}/${action === "approve" ? "approve" : "revoke"}`,
+            { method: "POST" },
+          ).then(async (response) => {
+            const data = (await response.json()) as { message?: string };
+            if (!response.ok) {
+              throw new Error(data.message ?? `Failed to ${action} access`);
+            }
+            return true;
+          }),
+        ),
+      );
+
+      const successCount = settled.filter((entry) => entry.status === "fulfilled").length;
+      const failedCount = settled.length - successCount;
+      await load();
+      setSelectedIds([]);
+      if (failedCount > 0) {
+        setFeedback({
+          kind: "error",
+          message: `${action === "approve" ? "Approve" : "Revoke"} completed with partial failures (${successCount} succeeded, ${failedCount} failed).`,
+        });
+      } else {
+        setFeedback({
+          kind: "success",
+          message: `${action === "approve" ? "Approved" : "Revoked"} ${successCount} request${successCount === 1 ? "" : "s"}.`,
+        });
+      }
+    } catch (bulkError) {
+      const message = bulkError instanceof Error ? bulkError.message : `Failed to ${action} selected requests`;
+      setError(message);
+      setFeedback({ kind: "error", message });
+    } finally {
+      setIsBulkSaving(false);
     }
   }
 
@@ -122,11 +245,118 @@ export default function AdminAccessRequestsTable() {
           {error}
         </div>
       )}
+      {feedback && (
+        <div
+          className={`rounded-xl border px-4 py-3 text-sm ${
+            feedback.kind === "success"
+              ? "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300"
+              : "border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300"
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          <label className="md:col-span-2">
+            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Search</span>
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search user, email, course"
+              className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            />
+          </label>
+          <label>
+            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as "all" | AccessRequestRow["status"])
+              }
+              className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            >
+              <option value="all">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+          </label>
+          <label>
+            <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Access</span>
+            <select
+              value={accessFilter}
+              onChange={(event) =>
+                setAccessFilter(event.target.value as "all" | "has_access" | "needs_access")
+              }
+              className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            >
+              <option value="all">All Access States</option>
+              <option value="has_access">Has Access</option>
+              <option value="needs_access">Needs Access</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Showing {filteredRows.length} of {rows.length} requests
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={selectedFilteredIds.length === 0 || isBulkSaving}
+              onClick={() => runBulkAction("approve")}
+              className="inline-flex h-8 items-center rounded-lg bg-brand-500 px-3 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+            >
+              {isBulkSaving ? "Saving..." : `Bulk Approve (${selectedFilteredIds.length})`}
+            </button>
+            <button
+              type="button"
+              disabled={selectedFilteredIds.length === 0 || !canBulkRevoke || isBulkSaving}
+              onClick={() => runBulkAction("revoke")}
+              className="inline-flex h-8 items-center rounded-lg border border-error-300 px-3 text-xs font-medium text-error-700 hover:bg-error-50 disabled:opacity-60 dark:border-error-600/40 dark:text-error-300 dark:hover:bg-error-500/10"
+            >
+              {isBulkSaving ? "Saving..." : "Bulk Revoke"}
+            </button>
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm("");
+                  setStatusFilter("all");
+                  setAccessFilter("all");
+                }}
+                className="inline-flex h-8 items-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <table className="min-w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40">
             <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="px-4 py-3">
+                <input
+                  type="checkbox"
+                  checked={filteredRowIds.length > 0 && selectedFilteredIds.length === filteredRowIds.length}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      setSelectedIds((current) => Array.from(new Set([...current, ...filteredRowIds])));
+                    } else {
+                      setSelectedIds((current) => current.filter((id) => !filteredRowIds.includes(id)));
+                    }
+                  }}
+                  aria-label="Select all filtered requests"
+                  className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                />
+              </th>
               <th className="px-4 py-3">User</th>
               <th className="px-4 py-3">Email</th>
               <th className="px-4 py-3">Course</th>
@@ -138,19 +368,34 @@ export default function AdminAccessRequestsTable() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                <td colSpan={7} className="px-4 py-4 text-gray-500 dark:text-gray-400">
                   Loading requests...
                 </td>
               </tr>
-            ) : rows.length === 0 ? (
+            ) : filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-4 text-gray-500 dark:text-gray-400">
-                  No access requests found.
+                <td colSpan={7} className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                  No access requests match your filters.
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              filteredRows.map((row) => (
                 <tr key={row.id} className="border-b border-gray-100 dark:border-gray-800/70">
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(row.id)}
+                      onChange={(event) => {
+                        setSelectedIds((current) =>
+                          event.target.checked
+                            ? Array.from(new Set([...current, row.id]))
+                            : current.filter((id) => id !== row.id),
+                        );
+                      }}
+                      aria-label={`Select request from ${row.user.name || row.user.email || "user"}`}
+                      className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-gray-800 dark:text-gray-200">
                     {row.user.name || "Unknown User"}
                   </td>
@@ -176,7 +421,7 @@ export default function AdminAccessRequestsTable() {
                       <button
                         type="button"
                         onClick={() => approveRequest(row.id)}
-                        disabled={activeId === row.id}
+                        disabled={activeId === row.id || isBulkSaving}
                         className="inline-flex items-center rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
                       >
                         {activeId === row.id ? "Saving..." : row.hasAccess ? "Re-Approve" : "Approve"}
@@ -185,7 +430,7 @@ export default function AdminAccessRequestsTable() {
                         <button
                           type="button"
                           onClick={() => revokeRequest(row.id)}
-                          disabled={activeId === row.id}
+                          disabled={activeId === row.id || isBulkSaving}
                           className="inline-flex items-center rounded-lg border border-error-300 px-3 py-1.5 text-xs font-medium text-error-700 hover:bg-error-50 disabled:opacity-60 dark:border-error-600/40 dark:text-error-300 dark:hover:bg-error-500/10"
                         >
                           {activeId === row.id ? "Saving..." : "Revoke"}

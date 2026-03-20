@@ -5,6 +5,7 @@ import { useSidebar } from "@/context/SidebarContext";
 import AppHeader from "@/layout/AppHeader";
 import AppSidebar, { type AppRole } from "@/layout/AppSidebar";
 import Backdrop from "@/layout/Backdrop";
+import PresenceHeartbeat from "@/components/activity/PresenceHeartbeat";
 
 type AdminShellProps = {
   children: React.ReactNode;
@@ -22,6 +23,7 @@ export default function AdminShell({ children, role }: AdminShellProps) {
 
   return (
     <div className="min-h-screen xl:flex">
+      <PresenceHeartbeat />
       <AppSidebar role={role} />
       <Backdrop />
       <div className={`flex-1 transition-all duration-300 ease-in-out ${mainContentMargin}`}>

@@ -1,11 +1,10 @@
 import React from "react";
-import AdminComingSoon from "@/components/common/AdminComingSoon";
+import LearnerAnalyticsPanel from "@/components/analytics/LearnerAnalyticsPanel";
+import { requireRole } from "@/lib/auth";
 
-export default function StudentProgressPage() {
-  return (
-    <AdminComingSoon
-      title="Progress"
-      description="Monitor learner progress and completion across modules."
-    />
-  );
+export const dynamic = "force-dynamic";
+
+export default async function StudentProgressPage() {
+  await requireRole(["ADMIN", "SUPER_ADMIN"]);
+  return <LearnerAnalyticsPanel />;
 }

@@ -38,7 +38,7 @@ const navItems: NavItem[] = [
     name: "Dashboard",
     subItems: [
       { name: "Overview", path: "/", pro: false },
-      { name: "Activity Timeline", path: "/dashboard/activity", pro: false },
+      { name: "Learner Analytics", path: "/dashboard/activity", pro: false },
     ],
   },
   {

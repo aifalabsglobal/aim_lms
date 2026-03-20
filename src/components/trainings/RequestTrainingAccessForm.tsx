@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type RequestTrainingAccessFormProps = {
   courses: Array<{ id: string; name: string }>;
+  selectedFolderId?: string;
 };
 
 type AccessRequestRow = {
@@ -25,12 +26,25 @@ function statusClassName(status: AccessRequestRow["status"]): string {
   return "border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300";
 }
 
-export default function RequestTrainingAccessForm({ courses }: RequestTrainingAccessFormProps) {
+export default function RequestTrainingAccessForm({
+  courses,
+  selectedFolderId: selectedFolderIdProp,
+}: RequestTrainingAccessFormProps) {
   const [selectedFolderId, setSelectedFolderId] = useState(courses[0]?.id ?? "");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!selectedFolderIdProp) {
+      return;
+    }
+    const hasRequestedCourse = courses.some((course) => course.id === selectedFolderIdProp);
+    if (hasRequestedCourse) {
+      setSelectedFolderId(selectedFolderIdProp);
+    }
+  }, [courses, selectedFolderIdProp]);
 
   const selectedCourse = useMemo(
     () => courses.find((course) => course.id === selectedFolderId) ?? null,

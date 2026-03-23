@@ -336,9 +336,9 @@ export default function AdminAccessRequestsTable() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-800 dark:text-white/90">User Access Requests</h2>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-white/90 sm:text-xl">User Access Requests</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Review requested courses and approve or reject access.
           </p>
@@ -346,7 +346,7 @@ export default function AdminAccessRequestsTable() {
         <button
           type="button"
           onClick={load}
-          className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 sm:w-auto"
         >
           Refresh
         </button>
@@ -412,11 +412,11 @@ export default function AdminAccessRequestsTable() {
           </label>
         </div>
 
-        <div className="mt-3 flex items-center justify-between">
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Showing {filteredRows.length} of {rows.length} requests
           </p>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               disabled={selectedFilteredIds.length === 0 || isBulkSaving}
@@ -458,7 +458,108 @@ export default function AdminAccessRequestsTable() {
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
+      <div className="space-y-3 lg:hidden">
+        {isLoading ? (
+          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400">
+            Loading requests...
+          </div>
+        ) : filteredRows.length === 0 ? (
+          <div className="rounded-2xl border border-gray-200 bg-white px-4 py-4 text-sm text-gray-500 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400">
+            No access requests match your filters.
+          </div>
+        ) : (
+          filteredRows.map((row) => (
+            <div
+              key={row.id}
+              className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-white/[0.03]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                    {row.user.name || "Unknown User"}
+                  </p>
+                  <p className="mt-0.5 break-all text-xs text-gray-500 dark:text-gray-400">
+                    {row.user.email || row.user.status}
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(row.id)}
+                  onChange={(event) => {
+                    setSelectedIds((current) =>
+                      event.target.checked
+                        ? Array.from(new Set([...current, row.id]))
+                        : current.filter((id) => id !== row.id),
+                    );
+                  }}
+                  aria-label={`Select request from ${row.user.name || row.user.email || "user"}`}
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+                />
+              </div>
+
+              <div className="mt-3 space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                <p>
+                  <span className="font-medium">Course:</span> {row.courseName}
+                </p>
+                <p>
+                  <span className="font-medium">Requested:</span>{" "}
+                  <span className="text-gray-500 dark:text-gray-400">
+                    {new Date(row.requestedAt).toLocaleString("en-IN")}
+                  </span>
+                </p>
+                <p className="flex items-center gap-2">
+                  <span className="font-medium">Access:</span>
+                  <span
+                    className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusBadge(
+                      row.status,
+                      row.hasAccess,
+                    )}`}
+                  >
+                    {row.hasAccess ? "HAS_ACCESS" : row.status === "APPROVED" ? "APPROVED_PENDING_SYNC" : row.status}
+                  </span>
+                </p>
+                {row.rejectionReason && (
+                  <p className="break-words text-error-700 dark:text-error-300">
+                    <span className="font-medium">Reason:</span> {row.rejectionReason}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => approveRequest(row.id)}
+                  disabled={activeId === row.id || isBulkSaving}
+                  className="inline-flex h-9 items-center justify-center rounded-lg bg-brand-500 px-3 text-xs font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+                >
+                  {activeId === row.id ? "Saving..." : row.hasAccess ? "Re-Approve" : "Approve"}
+                </button>
+                {!row.hasAccess ? (
+                  <button
+                    type="button"
+                    onClick={() => openRejectModal(row)}
+                    disabled={activeId === row.id || isBulkSaving}
+                    className="inline-flex h-9 items-center justify-center rounded-lg border border-error-300 px-3 text-xs font-medium text-error-700 hover:bg-error-50 disabled:opacity-60 dark:border-error-600/40 dark:text-error-300 dark:hover:bg-error-500/10"
+                  >
+                    {activeId === row.id ? "Saving..." : "Reject"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => revokeRequest(row.id)}
+                    disabled={activeId === row.id || isBulkSaving}
+                    className="inline-flex h-9 items-center justify-center rounded-lg border border-error-300 px-3 text-xs font-medium text-error-700 hover:bg-error-50 disabled:opacity-60 dark:border-error-600/40 dark:text-error-300 dark:hover:bg-error-500/10"
+                  >
+                    {activeId === row.id ? "Saving..." : "Revoke"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] lg:block">
         <table className="min-w-full text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40">
             <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -581,7 +682,7 @@ export default function AdminAccessRequestsTable() {
 
       {rejectTargetIds.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-800 dark:bg-gray-900">
             <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">
               {rejectTargetIds.length > 1 ? "Bulk Reject Access Requests" : "Reject Access Request"}
             </h3>
@@ -603,12 +704,12 @@ export default function AdminAccessRequestsTable() {
               />
             </label>
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{rejectReason.trim().length}/500 characters</p>
-            <div className="mt-4 flex items-center justify-end gap-2">
+            <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
               <button
                 type="button"
                 onClick={closeRejectModal}
                 disabled={isRejecting}
-                className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 sm:w-auto"
               >
                 Cancel
               </button>
@@ -616,7 +717,7 @@ export default function AdminAccessRequestsTable() {
                 type="button"
                 onClick={rejectRequest}
                 disabled={isRejecting || rejectReason.trim().length < REJECT_REASON_MIN_LENGTH}
-                className="inline-flex h-9 items-center rounded-lg border border-error-300 bg-error-50 px-3 text-xs font-medium text-error-700 hover:bg-error-100 disabled:opacity-60 dark:border-error-600/40 dark:bg-error-500/10 dark:text-error-300 dark:hover:bg-error-500/20"
+                className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-error-300 bg-error-50 px-3 text-xs font-medium text-error-700 hover:bg-error-100 disabled:opacity-60 dark:border-error-600/40 dark:bg-error-500/10 dark:text-error-300 dark:hover:bg-error-500/20 sm:w-auto"
               >
                 {isRejecting ? "Saving..." : "Reject Request"}
               </button>

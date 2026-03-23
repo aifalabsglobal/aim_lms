@@ -124,13 +124,13 @@ export default function RequestTrainingAccessForm({
         </p>
       </div>
 
-      <form onSubmit={onSubmit} className="flex flex-wrap items-end gap-2">
-        <label className="flex min-w-[280px] flex-col gap-1 text-xs text-gray-500 dark:text-gray-400">
+      <form onSubmit={onSubmit} className="grid grid-cols-1 items-end gap-2 md:grid-cols-[minmax(280px,1fr)_auto_auto]">
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-gray-500 dark:text-gray-400">
           Course
           <select
             value={selectedFolderId}
             onChange={(event) => setSelectedFolderId(event.target.value)}
-            className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+            className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
           >
             {courses.map((course) => (
               <option key={course.id} value={course.id}>
@@ -142,14 +142,14 @@ export default function RequestTrainingAccessForm({
         <button
           type="submit"
           disabled={isSubmitting || !selectedCourse}
-          className="inline-flex h-10 items-center rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60"
+          className="inline-flex h-10 w-full items-center justify-center rounded-lg bg-brand-500 px-4 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60 md:w-auto"
         >
           {isSubmitting ? "Submitting..." : "Request Access"}
         </button>
         <button
           type="button"
           onClick={loadRequests}
-          className="inline-flex h-10 items-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+          className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 md:w-auto"
         >
           {loaded ? "Refresh Requests" : "Load My Requests"}
         </button>
@@ -181,7 +181,7 @@ export default function RequestTrainingAccessForm({
             requests.map((request) => (
               <div
                 key={request.id}
-                className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700"
+                className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2 dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between"
               >
                 <div>
                   <p className="text-sm font-medium text-gray-800 dark:text-gray-100">

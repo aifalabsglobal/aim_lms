@@ -133,20 +133,20 @@ export default function LearnerAnalyticsPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">Learner Analytics</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold text-gray-800 dark:text-white/90 sm:text-2xl">Learner Analytics</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Progress, engagement, and live user monitoring (auto refresh every 20s).
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <label className="inline-flex w-full items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400 sm:w-auto sm:justify-start">
             Range
             <select
               value={range}
               onChange={(event) => setRange(event.target.value as AnalyticsRange)}
-              className="h-9 rounded-lg border border-gray-300 bg-white px-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              className="h-9 min-w-[140px] rounded-lg border border-gray-300 bg-white px-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
             >
               <option value="7d">Last 7 days</option>
               <option value="30d">Last 30 days</option>
@@ -156,7 +156,7 @@ export default function LearnerAnalyticsPanel() {
           <button
             type="button"
             onClick={() => void load(range)}
-            className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800 sm:w-auto"
           >
             Refresh
           </button>
@@ -175,7 +175,7 @@ export default function LearnerAnalyticsPanel() {
         </div>
       ) : state.data ? (
         <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {cards.map((card) => (
               <div
                 key={card.label}
@@ -189,8 +189,8 @@ export default function LearnerAnalyticsPanel() {
                         : "border-gray-200 dark:border-gray-800"
                 }`}
               >
-                <p className="text-xs text-gray-500 dark:text-gray-400">{card.label}</p>
-                <p className="mt-2 text-2xl font-semibold text-gray-800 dark:text-white/90">{card.value}</p>
+                <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">{card.label}</p>
+                <p className="mt-2 text-xl font-semibold text-gray-800 dark:text-white/90 sm:text-2xl">{card.value}</p>
               </div>
             ))}
           </div>
@@ -298,9 +298,9 @@ export default function LearnerAnalyticsPanel() {
                   state.data.topCourses.map((course) => (
                     <div
                       key={course.courseId}
-                      className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700"
+                      className="flex flex-col gap-1 rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <span className="line-clamp-1 text-gray-700 dark:text-gray-200">{course.courseName}</span>
+                      <span className="line-clamp-2 text-gray-700 dark:text-gray-200 sm:line-clamp-1">{course.courseName}</span>
                       <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
                         {course.learnerCount} learners
                       </span>
@@ -323,7 +323,7 @@ export default function LearnerAnalyticsPanel() {
                       key={`${entry.email ?? entry.userName}-${entry.lastSeenAt}-${index}`}
                       className="rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-gray-700"
                     >
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                         <p className="font-medium text-gray-700 dark:text-gray-200">{entry.userName}</p>
                         <span className="rounded-full border border-gray-300 px-2 py-0.5 text-[10px] uppercase text-gray-600 dark:border-gray-700 dark:text-gray-300">
                           {entry.role}
@@ -331,7 +331,7 @@ export default function LearnerAnalyticsPanel() {
                       </div>
                       <p className="mt-1 text-gray-500 dark:text-gray-400">{entry.email ?? "No email"}</p>
                       <p className="mt-1 text-gray-500 dark:text-gray-400">
-                        Path: <span className="font-mono">{entry.currentPath}</span>
+                        Path: <span className="break-all font-mono">{entry.currentPath}</span>
                       </p>
                       <p className="mt-1 text-gray-500 dark:text-gray-400">
                         Last seen: {formatLastSeen(entry.lastSeenAt)}

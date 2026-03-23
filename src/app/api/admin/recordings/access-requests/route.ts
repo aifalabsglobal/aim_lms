@@ -33,6 +33,7 @@ export async function GET() {
           courseFolderId: request.courseFolderId,
           courseName: request.courseName,
           status: request.status,
+          rejectionReason: request.rejectionReason,
           requestedAt: request.requestedAt,
           reviewedAt: request.reviewedAt,
           hasAccess,

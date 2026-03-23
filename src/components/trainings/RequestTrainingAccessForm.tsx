@@ -12,6 +12,7 @@ type AccessRequestRow = {
   courseFolderId: string;
   courseName: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
+  rejectionReason: string | null;
   requestedAt: string;
   reviewedAt: string | null;
 };
@@ -189,6 +190,11 @@ export default function RequestTrainingAccessForm({
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     Requested: {new Date(request.requestedAt).toLocaleString("en-IN")}
                   </p>
+                  {request.status === "REJECTED" && request.rejectionReason && (
+                    <p className="mt-1 text-xs text-error-700 dark:text-error-300">
+                      Reason: {request.rejectionReason}
+                    </p>
+                  )}
                 </div>
                 <span
                   className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${statusClassName(

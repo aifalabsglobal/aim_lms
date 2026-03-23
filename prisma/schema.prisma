@@ -93,6 +93,7 @@ model RecordingAccessRequest {
   courseFolderId String
   courseName     String
   status         RecordingAccessRequestStatus @default(PENDING)
+  rejectionReason String?
   requestedAt    DateTime                    @default(now())
   reviewedAt     DateTime?
   updatedAt      DateTime                    @updatedAt

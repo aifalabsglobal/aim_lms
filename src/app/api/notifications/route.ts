@@ -63,6 +63,13 @@ export async function GET() {
           userId: appUser.id,
           status: { in: ["APPROVED", "REJECTED"] },
         },
+        select: {
+          id: true,
+          status: true,
+          courseName: true,
+          rejectionReason: true,
+          updatedAt: true,
+        },
         orderBy: { updatedAt: "desc" },
         take: 20,
       });
@@ -74,7 +81,7 @@ export async function GET() {
         message:
           request.status === "APPROVED"
             ? `Your access request for ${request.courseName} has been approved.`
-            : `Your access request for ${request.courseName} was rejected.`,
+            : `Your access request for ${request.courseName} was rejected${request.rejectionReason ? `: ${request.rejectionReason}` : "."}`,
         href: "/trainings",
         createdAt: request.updatedAt.toISOString(),
       }));

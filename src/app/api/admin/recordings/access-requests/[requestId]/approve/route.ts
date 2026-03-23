@@ -40,6 +40,7 @@ export async function POST(_: Request, { params }: RouteParams) {
         data: {
           status: "PENDING",
           reviewedAt: null,
+          rejectionReason: null,
         },
       });
       return NextResponse.json(
@@ -52,6 +53,7 @@ export async function POST(_: Request, { params }: RouteParams) {
       data: {
         status: "APPROVED",
         reviewedAt: new Date(),
+        rejectionReason: null,
       },
     });
 

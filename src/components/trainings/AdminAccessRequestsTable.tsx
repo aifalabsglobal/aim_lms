@@ -7,6 +7,7 @@ type AccessRequestRow = {
   courseFolderId: string;
   courseName: string;
   status: "PENDING" | "APPROVED" | "REJECTED";
+  rejectionReason: string | null;
   requestedAt: string;
   reviewedAt: string | null;
   hasAccess: boolean;
@@ -38,6 +39,7 @@ function statusBadge(status: AccessRequestRow["status"], hasAccess: boolean): st
 }
 
 export default function AdminAccessRequestsTable() {
+  const REJECT_REASON_MIN_LENGTH = 3;
   const [rows, setRows] = useState<AccessRequestRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +50,10 @@ export default function AdminAccessRequestsTable() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | AccessRequestRow["status"]>("all");
   const [accessFilter, setAccessFilter] = useState<"all" | "has_access" | "needs_access">("all");
+  const [rejectTargetIds, setRejectTargetIds] = useState<string[]>([]);
+  const [rejectContextLabel, setRejectContextLabel] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+  const [isRejecting, setIsRejecting] = useState(false);
 
   async function load() {
     setIsLoading(true);
@@ -127,6 +133,111 @@ export default function AdminAccessRequestsTable() {
     }
   }
 
+  function openRejectModal(row: AccessRequestRow) {
+    setRejectTargetIds([row.id]);
+    setRejectContextLabel(row.courseName);
+    setRejectReason(row.rejectionReason ?? "");
+    setError(null);
+    setFeedback(null);
+  }
+
+  function openBulkRejectModal() {
+    const targets = selectedFilteredRows.filter((row) => !row.hasAccess);
+    if (targets.length === 0) {
+      const message = "Select at least one row that does not already have access.";
+      setError(message);
+      setFeedback({ kind: "error", message });
+      return;
+    }
+    setRejectTargetIds(targets.map((row) => row.id));
+    setRejectContextLabel(`${targets.length} selected request${targets.length === 1 ? "" : "s"}`);
+    setRejectReason("");
+    setError(null);
+    setFeedback(null);
+  }
+
+  function closeRejectModal() {
+    if (isRejecting) {
+      return;
+    }
+    setRejectTargetIds([]);
+    setRejectContextLabel("");
+    setRejectReason("");
+  }
+
+  async function rejectRequest() {
+    if (rejectTargetIds.length === 0) {
+      return;
+    }
+    const reason = rejectReason.trim();
+    if (reason.length < REJECT_REASON_MIN_LENGTH) {
+      const message = `Please enter at least ${REJECT_REASON_MIN_LENGTH} characters for rejection reason.`;
+      setError(message);
+      setFeedback({ kind: "error", message });
+      return;
+    }
+
+    setIsRejecting(true);
+    const isBulkReject = rejectTargetIds.length > 1;
+    if (isBulkReject) {
+      setIsBulkSaving(true);
+    } else {
+      setActiveId(rejectTargetIds[0]);
+    }
+    setError(null);
+    setFeedback(null);
+    try {
+      const settled = await Promise.allSettled(
+        rejectTargetIds.map((requestId) =>
+          fetch(`/api/admin/recordings/access-requests/${encodeURIComponent(requestId)}/reject`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason }),
+          }).then(async (response) => {
+            const data = (await response.json()) as { message?: string };
+            if (!response.ok) {
+              throw new Error(data.message ?? "Failed to reject access");
+            }
+            return true;
+          }),
+        ),
+      );
+
+      const successCount = settled.filter((entry) => entry.status === "fulfilled").length;
+      const failedCount = settled.length - successCount;
+      if (successCount === 0) {
+        throw new Error("Failed to reject selected requests");
+      }
+
+      await load();
+      if (isBulkReject) {
+        setSelectedIds([]);
+      }
+      setFeedback(
+        failedCount > 0
+          ? {
+              kind: "error",
+              message: `Reject completed with partial failures (${successCount} succeeded, ${failedCount} failed).`,
+            }
+          : {
+              kind: "success",
+              message: `Rejected ${successCount} request${successCount === 1 ? "" : "s"}.`,
+            },
+      );
+      setRejectTargetIds([]);
+      setRejectContextLabel("");
+      setRejectReason("");
+    } catch (rejectError) {
+      const message = rejectError instanceof Error ? rejectError.message : "Failed to reject access";
+      setError(message);
+      setFeedback({ kind: "error", message });
+    } finally {
+      setIsRejecting(false);
+      setIsBulkSaving(false);
+      setActiveId(null);
+    }
+  }
+
   const filteredRows = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
     return rows.filter((row) => {
@@ -162,6 +273,7 @@ export default function AdminAccessRequestsTable() {
   const selectedFilteredIds = selectedIds.filter((id) => filteredRowIds.includes(id));
   const selectedFilteredRows = filteredRows.filter((row) => selectedFilteredIds.includes(row.id));
   const canBulkRevoke = selectedFilteredRows.some((row) => row.hasAccess);
+  const canBulkReject = selectedFilteredRows.some((row) => !row.hasAccess);
 
   async function runBulkAction(action: "approve" | "revoke") {
     if (selectedFilteredIds.length === 0) {
@@ -228,7 +340,7 @@ export default function AdminAccessRequestsTable() {
         <div>
           <h2 className="text-xl font-semibold text-gray-800 dark:text-white/90">User Access Requests</h2>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Review requested courses and approve access.
+            Review requested courses and approve or reject access.
           </p>
         </div>
         <button
@@ -321,6 +433,14 @@ export default function AdminAccessRequestsTable() {
             >
               {isBulkSaving ? "Saving..." : "Bulk Revoke"}
             </button>
+            <button
+              type="button"
+              disabled={selectedFilteredIds.length === 0 || !canBulkReject || isBulkSaving}
+              onClick={openBulkRejectModal}
+              className="inline-flex h-8 items-center rounded-lg border border-error-300 px-3 text-xs font-medium text-error-700 hover:bg-error-50 disabled:opacity-60 dark:border-error-600/40 dark:text-error-300 dark:hover:bg-error-500/10"
+            >
+              {isBulkSaving ? "Saving..." : `Bulk Reject (${selectedFilteredIds.length})`}
+            </button>
             {hasActiveFilters && (
               <button
                 type="button"
@@ -362,19 +482,20 @@ export default function AdminAccessRequestsTable() {
               <th className="px-4 py-3">Course</th>
               <th className="px-4 py-3">Requested</th>
               <th className="px-4 py-3">Access</th>
+              <th className="px-4 py-3">Reason</th>
               <th className="px-4 py-3">Action</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={7} className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                <td colSpan={8} className="px-4 py-4 text-gray-500 dark:text-gray-400">
                   Loading requests...
                 </td>
               </tr>
             ) : filteredRows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-4 text-gray-500 dark:text-gray-400">
+                <td colSpan={8} className="px-4 py-4 text-gray-500 dark:text-gray-400">
                   No access requests match your filters.
                 </td>
               </tr>
@@ -416,6 +537,9 @@ export default function AdminAccessRequestsTable() {
                       {row.hasAccess ? "HAS_ACCESS" : row.status === "APPROVED" ? "APPROVED_PENDING_SYNC" : row.status}
                     </span>
                   </td>
+                  <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                    {row.rejectionReason ?? "-"}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <button
@@ -426,6 +550,16 @@ export default function AdminAccessRequestsTable() {
                       >
                         {activeId === row.id ? "Saving..." : row.hasAccess ? "Re-Approve" : "Approve"}
                       </button>
+                      {!row.hasAccess && (
+                        <button
+                          type="button"
+                          onClick={() => openRejectModal(row)}
+                          disabled={activeId === row.id || isBulkSaving}
+                          className="inline-flex items-center rounded-lg border border-error-300 px-3 py-1.5 text-xs font-medium text-error-700 hover:bg-error-50 disabled:opacity-60 dark:border-error-600/40 dark:text-error-300 dark:hover:bg-error-500/10"
+                        >
+                          {activeId === row.id ? "Saving..." : "Reject"}
+                        </button>
+                      )}
                       {row.hasAccess && (
                         <button
                           type="button"
@@ -444,6 +578,52 @@ export default function AdminAccessRequestsTable() {
           </tbody>
         </table>
       </div>
+
+      {rejectTargetIds.length > 0 && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+            <h3 className="text-base font-semibold text-gray-800 dark:text-gray-100">
+              {rejectTargetIds.length > 1 ? "Bulk Reject Access Requests" : "Reject Access Request"}
+            </h3>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Provide a reason for rejecting access to <span className="font-medium">{rejectContextLabel}</span>.
+            </p>
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              This will reject {rejectTargetIds.length} request{rejectTargetIds.length === 1 ? "" : "s"}.
+            </p>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Reason</span>
+              <textarea
+                value={rejectReason}
+                onChange={(event) => setRejectReason(event.target.value)}
+                rows={4}
+                maxLength={500}
+                placeholder="Add a clear reason so the learner knows what to do next."
+                className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+              />
+            </label>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{rejectReason.trim().length}/500 characters</p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeRejectModal}
+                disabled={isRejecting}
+                className="inline-flex h-9 items-center rounded-lg border border-gray-300 px-3 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:opacity-60 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={rejectRequest}
+                disabled={isRejecting || rejectReason.trim().length < REJECT_REASON_MIN_LENGTH}
+                className="inline-flex h-9 items-center rounded-lg border border-error-300 bg-error-50 px-3 text-xs font-medium text-error-700 hover:bg-error-100 disabled:opacity-60 dark:border-error-600/40 dark:bg-error-500/10 dark:text-error-300 dark:hover:bg-error-500/20"
+              >
+                {isRejecting ? "Saving..." : "Reject Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ export async function GET() {
         courseFolderId: true,
         courseName: true,
         status: true,
+        rejectionReason: true,
         requestedAt: true,
         reviewedAt: true,
       },
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
         courseName,
         userEmail,
         status: "PENDING",
+        rejectionReason: null,
         reviewedAt: null,
       },
       create: {
@@ -79,6 +81,7 @@ export async function POST(request: Request) {
         courseFolderId: true,
         courseName: true,
         status: true,
+        rejectionReason: true,
         requestedAt: true,
         reviewedAt: true,
       },

@@ -46,6 +46,7 @@ export async function POST(_: Request, { params }: RouteParams) {
       data: {
         status: "REJECTED",
         reviewedAt: new Date(),
+        rejectionReason: null,
       },
     });
 

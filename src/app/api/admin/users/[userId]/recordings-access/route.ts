@@ -46,7 +46,9 @@ export async function GET(_: Request, { params }: RouteParams) {
     const folders = await getRecordingsFolders();
     const accessChecks = await Promise.all(
       folders.map(async (folder) => {
-        const emails = await listRecordingFolderAccess(folder.id).catch(() => []);
+        const emails = await listRecordingFolderAccess(folder.id).catch(
+          (): string[] => [],
+        );
         const normalizedEmail = user.email?.trim().toLowerCase() ?? "";
         return {
           folderId: folder.id,
@@ -108,7 +110,9 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
     const currentAccessChecks = await Promise.all(
       folders.map(async (folder) => {
-        const emails = await listRecordingFolderAccess(folder.id).catch(() => []);
+        const emails = await listRecordingFolderAccess(folder.id).catch(
+          (): string[] => [],
+        );
         return {
           folderId: folder.id,
           hasAccess: emails.includes(userEmail),
@@ -133,7 +137,9 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
     const finalAccessChecks = await Promise.all(
       folders.map(async (folder) => {
-        const emails = await listRecordingFolderAccess(folder.id).catch(() => []);
+        const emails = await listRecordingFolderAccess(folder.id).catch(
+          (): string[] => [],
+        );
         return {
           folderId: folder.id,
           hasAccess: emails.includes(userEmail),

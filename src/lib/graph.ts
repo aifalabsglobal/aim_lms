@@ -1,5 +1,3 @@
-import { prisma } from "@/lib/prisma";
-
 type GraphTokenResponse = {
   access_token?: string;
   error?: string;
@@ -796,65 +794,12 @@ function normalizeEmailAddress(value: string | null | undefined): string | null 
   return normalized || null;
 }
 
-function normalizeCourseKey(value: string | null | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
-}
-
-async function getEnrolledCourseNameKeysForUser(userId: string): Promise<Set<string>> {
-  const normalizedUserId = userId.trim();
-  if (!normalizedUserId) {
-    return new Set<string>();
-  }
-  const enrollments = await prisma.enrollment.findMany({
-    where: { studentId: normalizedUserId },
-    include: {
-      course: {
-        select: {
-          title: true,
-        },
-      },
-    },
-  });
-  return new Set(
-    enrollments
-      .map((enrollment) => normalizeCourseKey(enrollment.course?.title ?? ""))
-      .filter(Boolean),
-  );
-}
-
-async function isViewerEnrolledForCourseFolder(
-  viewer: TrainingViewerContext | undefined,
-  folderName: string | null,
-): Promise<boolean> {
-  if (isPrivilegedRole(viewer?.role ?? null)) {
-    return true;
-  }
-  const viewerUserId = viewer?.userId?.trim() ?? "";
-  if (!viewerUserId) {
-    return false;
-  }
-  const folderKey = normalizeCourseKey(folderName);
-  if (!folderKey) {
-    return false;
-  }
-  const enrolledKeys = await getEnrolledCourseNameKeysForUser(viewerUserId);
-  return enrolledKeys.has(folderKey);
-}
-
 export async function isCourseFolderUnlockedForViewer(
   folderId: string,
-  folderName: string | null,
+  _folderName: string | null,
   viewer?: TrainingViewerContext,
 ): Promise<boolean> {
   if (isPrivilegedRole(viewer?.role ?? null)) {
-    return true;
-  }
-
-  const enrolled = await isViewerEnrolledForCourseFolder(viewer, folderName);
-  if (enrolled) {
     return true;
   }
 
@@ -2047,7 +1992,7 @@ export async function fetchMyFileById(
         });
       const previewVideoId = orderedVideos[0]?.id ?? null;
       if (!previewVideoId || previewVideoId !== mapped.id) {
-        throw new Error("Locked: Enroll in this course to unlock all videos.");
+        throw new Error("Locked: Ask an admin to grant folder access.");
       }
     }
   }

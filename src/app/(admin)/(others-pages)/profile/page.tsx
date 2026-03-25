@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 export default function Profile() {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-2 dark:border-gray-800 dark:bg-white/[0.03] lg:p-4">
-      <div className="overflow-x-auto">
+      <div className="overflow-hidden">
         <UserProfile
           routing="hash"
           appearance={{

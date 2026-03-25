@@ -115,7 +115,7 @@ export default function FolderAccessManager({ folderId }: FolderAccessManagerPro
             value={newEmail}
             onChange={(event) => setNewEmail(event.target.value)}
             placeholder="user@company.com"
-            className="h-10 min-w-[280px] rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
+            className="h-10 w-full sm:min-w-[280px] rounded-lg border border-gray-300 bg-transparent px-3 text-sm text-gray-800 outline-hidden focus:border-brand-500 dark:border-gray-700 dark:text-gray-200"
           />
           <button
             type="button"

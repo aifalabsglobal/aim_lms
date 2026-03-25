@@ -559,8 +559,8 @@ export default function AdminAccessRequestsTable() {
         )}
       </div>
 
-      <div className="hidden overflow-x-auto rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] lg:block">
-        <table className="min-w-full text-sm">
+      <div className="hidden overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03] lg:block">
+        <table className="w-full table-fixed text-sm">
           <thead className="border-b border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/40">
             <tr className="text-left text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
               <th className="px-4 py-3">
@@ -618,13 +618,13 @@ export default function AdminAccessRequestsTable() {
                       className="h-4 w-4 rounded border-gray-300 text-brand-500 focus:ring-brand-500"
                     />
                   </td>
-                  <td className="px-4 py-3 text-gray-800 dark:text-gray-200">
+                  <td className="px-4 py-3 text-gray-800 dark:text-gray-200 break-words">
                     {row.user.name || "Unknown User"}
                   </td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300 break-all">
                     {row.user.email || row.user.status}
                   </td>
-                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{row.courseName}</td>
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300 break-words">{row.courseName}</td>
                   <td className="px-4 py-3 text-xs text-gray-500 dark:text-gray-400">
                     {new Date(row.requestedAt).toLocaleString("en-IN")}
                   </td>
@@ -638,11 +638,11 @@ export default function AdminAccessRequestsTable() {
                       {row.hasAccess ? "HAS_ACCESS" : row.status === "APPROVED" ? "APPROVED_PENDING_SYNC" : row.status}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
+                  <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300 break-words">
                     {row.rejectionReason ?? "-"}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => approveRequest(row.id)}

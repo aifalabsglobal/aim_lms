@@ -1,4 +1,5 @@
 import { requireAppUser } from "@/lib/auth";
+import { listRecordingFolderAccess } from "@/lib/graph";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
@@ -6,6 +7,26 @@ type AccessRequestPayload = {
   folderId?: string;
   courseName?: string;
 };
+
+async function enrichRequestsWithGraphAccess<
+  T extends { courseFolderId: string; userEmail?: string | null },
+>(requests: T[], userEmail: string | null | undefined) {
+  const normalizedUserEmail = userEmail?.trim().toLowerCase() ?? "";
+  return Promise.all(
+    requests.map(async (request) => {
+      const allowedEmails = await listRecordingFolderAccess(request.courseFolderId).catch(
+        (): string[] => [],
+      );
+      const hasAccess = normalizedUserEmail
+        ? allowedEmails.includes(normalizedUserEmail)
+        : false;
+      return {
+        ...request,
+        hasAccess,
+      };
+    }),
+  );
+}
 
 export async function GET() {
   try {
@@ -23,7 +44,8 @@ export async function GET() {
         reviewedAt: true,
       },
     });
-    return NextResponse.json({ requests });
+    const enriched = await enrichRequestsWithGraphAccess(requests, appUser.email);
+    return NextResponse.json({ requests: enriched });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to load access requests";
     if (message === "UNAUTHORIZED") {
@@ -86,7 +108,8 @@ export async function POST(request: Request) {
         reviewedAt: true,
       },
     });
-    return NextResponse.json({ requests });
+    const enriched = await enrichRequestsWithGraphAccess(requests, userEmail);
+    return NextResponse.json({ requests: enriched });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to submit access request";
     if (message === "UNAUTHORIZED") {

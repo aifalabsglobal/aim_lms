@@ -25,14 +25,21 @@ type FeedbackState = {
   message: string;
 } | null;
 
-function statusBadge(status: AccessRequestRow["status"], hasAccess: boolean): string {
-  if (hasAccess) {
+function displayAccessLabel(row: AccessRequestRow): string {
+  if (row.hasAccess) {
+    return "HAS_ACCESS";
+  }
+  if (row.status === "REJECTED") {
+    return "REJECTED";
+  }
+  return "PENDING";
+}
+
+function statusBadge(row: AccessRequestRow): string {
+  if (row.hasAccess) {
     return "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300";
   }
-  if (status === "APPROVED") {
-    return "border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300";
-  }
-  if (status === "REJECTED") {
+  if (row.status === "REJECTED") {
     return "border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300";
   }
   return "border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300";
@@ -511,11 +518,10 @@ export default function AdminAccessRequestsTable() {
                   <span className="font-medium">Access:</span>
                   <span
                     className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusBadge(
-                      row.status,
-                      row.hasAccess,
+                      row,
                     )}`}
                   >
-                    {row.hasAccess ? "HAS_ACCESS" : row.status === "APPROVED" ? "APPROVED_PENDING_SYNC" : row.status}
+                    {displayAccessLabel(row)}
                   </span>
                 </p>
                 {row.rejectionReason && (
@@ -631,11 +637,10 @@ export default function AdminAccessRequestsTable() {
                   <td className="px-4 py-3">
                     <span
                       className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${statusBadge(
-                        row.status,
-                        row.hasAccess,
+                        row,
                       )}`}
                     >
-                      {row.hasAccess ? "HAS_ACCESS" : row.status === "APPROVED" ? "APPROVED_PENDING_SYNC" : row.status}
+                      {displayAccessLabel(row)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-600 dark:text-gray-300 break-words">

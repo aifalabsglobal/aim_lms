@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAppUser } from "@/lib/auth";
+import { listRecordingFolderAccess } from "@/lib/graph";
 import { prisma } from "@/lib/prisma";
 
 type NotificationItem = {
@@ -66,7 +67,9 @@ export async function GET() {
         select: {
           id: true,
           status: true,
+          courseFolderId: true,
           courseName: true,
+          userEmail: true,
           rejectionReason: true,
           updatedAt: true,
         },
@@ -74,17 +77,35 @@ export async function GET() {
         take: 20,
       });
 
-      notifications = reviewedRequests.map((request) => ({
-        id: request.id,
-        type: "ACCESS_REQUEST_REVIEWED",
-        title: request.status === "APPROVED" ? "Access Approved" : "Access Rejected",
-        message:
-          request.status === "APPROVED"
+      const learnerEmail = (appUser.email ?? "").trim().toLowerCase();
+      const reviewedWithAccess = await Promise.all(
+        reviewedRequests.map(async (request) => {
+          if (request.status !== "APPROVED") {
+            return { request, hasAccess: false };
+          }
+          const allowedEmails = await listRecordingFolderAccess(request.courseFolderId).catch(
+            (): string[] => [],
+          );
+          const email = learnerEmail || request.userEmail.trim().toLowerCase();
+          return {
+            request,
+            hasAccess: email ? allowedEmails.includes(email) : false,
+          };
+        }),
+      );
+
+      notifications = reviewedWithAccess
+        .filter(({ request, hasAccess }) => request.status === "REJECTED" || hasAccess)
+        .map(({ request, hasAccess }) => ({
+          id: request.id,
+          type: "ACCESS_REQUEST_REVIEWED" as const,
+          title: hasAccess ? "Access Approved" : "Access Rejected",
+          message: hasAccess
             ? `Your access request for ${request.courseName} has been approved.`
             : `Your access request for ${request.courseName} was rejected${request.rejectionReason ? `: ${request.rejectionReason}` : "."}`,
-        href: "/trainings",
-        createdAt: request.updatedAt.toISOString(),
-      }));
+          href: "/trainings",
+          createdAt: request.updatedAt.toISOString(),
+        }));
     }
 
     let unreadCount = notifications.length;

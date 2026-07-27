@@ -28,14 +28,45 @@ export async function GET() {
         );
         const normalizedUserEmail = request.userEmail.trim().toLowerCase();
         const hasAccess = allowedEmails.includes(normalizedUserEmail);
+
+        // Keep DB audit aligned with OneDrive when a share already exists.
+        let status = request.status;
+        let reviewedAt = request.reviewedAt;
+        if (hasAccess && request.status !== "APPROVED") {
+          const updated = await prisma.recordingAccessRequest.update({
+            where: { id: request.id },
+            data: {
+              status: "APPROVED",
+              reviewedAt: request.reviewedAt ?? new Date(),
+              rejectionReason: null,
+            },
+            select: { status: true, reviewedAt: true },
+          });
+          status = updated.status;
+          reviewedAt = updated.reviewedAt;
+        } else if (!hasAccess && request.status === "APPROVED") {
+          // Graph is source of truth: do not keep APPROVED without live access.
+          const updated = await prisma.recordingAccessRequest.update({
+            where: { id: request.id },
+            data: {
+              status: "PENDING",
+              reviewedAt: null,
+              rejectionReason: null,
+            },
+            select: { status: true, reviewedAt: true },
+          });
+          status = updated.status;
+          reviewedAt = updated.reviewedAt;
+        }
+
         return {
           id: request.id,
           courseFolderId: request.courseFolderId,
           courseName: request.courseName,
-          status: request.status,
-          rejectionReason: request.rejectionReason,
+          status,
+          rejectionReason: hasAccess ? null : request.rejectionReason,
           requestedAt: request.requestedAt,
-          reviewedAt: request.reviewedAt,
+          reviewedAt,
           hasAccess,
           user: request.user,
         };

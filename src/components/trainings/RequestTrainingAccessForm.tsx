@@ -15,6 +15,7 @@ type AccessRequestRow = {
   rejectionReason: string | null;
   requestedAt: string;
   reviewedAt: string | null;
+  hasAccess: boolean;
 };
 
 type FeedbackState = {
@@ -22,11 +23,21 @@ type FeedbackState = {
   message: string;
 } | null;
 
-function statusClassName(status: AccessRequestRow["status"]): string {
-  if (status === "APPROVED") {
+function displayAccessLabel(request: AccessRequestRow): string {
+  if (request.hasAccess) {
+    return "HAS_ACCESS";
+  }
+  if (request.status === "REJECTED") {
+    return "REJECTED";
+  }
+  return "PENDING";
+}
+
+function statusClassName(request: AccessRequestRow): string {
+  if (request.hasAccess) {
     return "border-success-200 bg-success-50 text-success-700 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300";
   }
-  if (status === "REJECTED") {
+  if (request.status === "REJECTED") {
     return "border-error-200 bg-error-50 text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300";
   }
   return "border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300";
@@ -120,7 +131,8 @@ export default function RequestTrainingAccessForm({
       <div>
         <h2 className="text-base font-semibold text-gray-800 dark:text-white/90">Request Access</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-          You do not have access yet. Select a course and send access request to admin.
+          Access is controlled in OneDrive. Select a course and send an access request to admin if
+          you do not have folder permission yet.
         </p>
       </div>
 
@@ -190,7 +202,7 @@ export default function RequestTrainingAccessForm({
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     Requested: {new Date(request.requestedAt).toLocaleString("en-IN")}
                   </p>
-                  {request.status === "REJECTED" && request.rejectionReason && (
+                  {!request.hasAccess && request.status === "REJECTED" && request.rejectionReason && (
                     <p className="mt-1 text-xs text-error-700 dark:text-error-300">
                       Reason: {request.rejectionReason}
                     </p>
@@ -198,10 +210,10 @@ export default function RequestTrainingAccessForm({
                 </div>
                 <span
                   className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-medium ${statusClassName(
-                    request.status,
+                    request,
                   )}`}
                 >
-                  {request.status}
+                  {displayAccessLabel(request)}
                 </span>
               </div>
             ))

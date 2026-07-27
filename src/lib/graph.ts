@@ -1,8 +1,81 @@
 type GraphTokenResponse = {
   access_token?: string;
+  expires_in?: number;
   error?: string;
   error_description?: string;
 };
+
+type CachedGraphToken = {
+  token: string;
+  expiresAtMs: number;
+};
+
+let cachedGraphToken: CachedGraphToken | null = null;
+let pendingGraphToken: Promise<string> | null = null;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientGraphStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+function isTransientGraphError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (
+    message.includes("fetch failed") ||
+    message.includes("network") ||
+    message.includes("econnreset") ||
+    message.includes("etimedout") ||
+    message.includes("socket hang up")
+  ) {
+    return true;
+  }
+  const statusMatch = message.match(/graph request failed:\s*(\d{3})/);
+  if (statusMatch) {
+    return isTransientGraphStatus(Number(statusMatch[1]));
+  }
+  const code = getGraphErrorCode(error);
+  return (
+    code === "toomanyrequests" ||
+    code === "activitylimitreached" ||
+    code === "serviceunavailable" ||
+    code === "unknownerror"
+  );
+}
+
+async function withGraphRetry<T>(
+  operation: () => Promise<T>,
+  options?: { attempts?: number; baseDelayMs?: number },
+): Promise<T> {
+  const attempts = options?.attempts ?? 4;
+  const baseDelayMs = options?.baseDelayMs ?? 500;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts || !isTransientGraphError(error)) {
+        throw error;
+      }
+      const retryAfterMatch =
+        error instanceof Error
+          ? error.message.match(/"retry[- ]?after"\s*:\s*"?(\d+)"?/i)
+          : null;
+      const retryAfterMs = retryAfterMatch
+        ? Number(retryAfterMatch[1]) * 1000
+        : baseDelayMs * 2 ** (attempt - 1);
+      await sleep(Math.min(Math.max(retryAfterMs, baseDelayMs), 8000));
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Graph request failed after retries");
+}
 
 type GraphDateTime = {
   dateTime?: string;
@@ -444,37 +517,60 @@ function getRequiredEnv(name: string): string {
 }
 
 async function getMicrosoftGraphAccessToken(): Promise<string> {
-  const tenantId = getRequiredEnv("AZURE_TENANT_ID");
-  const clientId = getRequiredEnv("AZURE_CLIENT_ID");
-  const clientSecret = getRequiredEnv("AZURE_CLIENT_SECRET");
-  const tokenEndpoint = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-
-  const body = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    grant_type: "client_credentials",
-    scope: "https://graph.microsoft.com/.default",
-  });
-
-  const response = await fetch(tokenEndpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body,
-    cache: "no-store",
-  });
-
-  const json = (await response.json()) as GraphTokenResponse;
-  if (!response.ok || !json.access_token) {
-    throw new Error(
-      `Graph token request failed: ${json.error ?? "unknown_error"} ${
-        json.error_description ?? ""
-      }`.trim(),
-    );
+  const now = Date.now();
+  if (cachedGraphToken && cachedGraphToken.expiresAtMs > now + 60_000) {
+    return cachedGraphToken.token;
+  }
+  if (pendingGraphToken) {
+    return pendingGraphToken;
   }
 
-  return json.access_token;
+  pendingGraphToken = (async () => {
+    const tenantId = getRequiredEnv("AZURE_TENANT_ID");
+    const clientId = getRequiredEnv("AZURE_CLIENT_ID");
+    const clientSecret = getRequiredEnv("AZURE_CLIENT_SECRET");
+    const tokenEndpoint = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
+
+    const body = new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: "client_credentials",
+      scope: "https://graph.microsoft.com/.default",
+    });
+
+    const json = await withGraphRetry(async () => {
+      const response = await fetch(tokenEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body,
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as GraphTokenResponse;
+      if (!response.ok || !payload.access_token) {
+        throw new Error(
+          `Graph token request failed: ${payload.error ?? response.status} ${
+            payload.error_description ?? ""
+          }`.trim(),
+        );
+      }
+      return payload;
+    });
+
+    const expiresInSec = Number(json.expires_in ?? 3600);
+    cachedGraphToken = {
+      token: json.access_token!,
+      expiresAtMs: Date.now() + Math.max(60, expiresInSec) * 1000,
+    };
+    return cachedGraphToken.token;
+  })();
+
+  try {
+    return await pendingGraphToken;
+  } finally {
+    pendingGraphToken = null;
+  }
 }
 
 export async function getGraphAppAccessToken(): Promise<string> {
@@ -498,41 +594,45 @@ export function getDefaultMeetingOwner(): string {
 }
 
 async function graphGet<T>(token: string, url: string): Promise<T> {
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Prefer: 'outlook.timezone="UTC"',
-    },
-    cache: "no-store",
+  return withGraphRetry(async () => {
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph request failed: ${response.status} ${text}`);
+    }
+
+    return (await response.json()) as T;
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Graph request failed: ${response.status} ${text}`);
-  }
-
-  return (await response.json()) as T;
 }
 
 async function graphPost<T>(token: string, url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Prefer: 'outlook.timezone="UTC"',
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
+  return withGraphRetry(async () => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph request failed: ${response.status} ${text}`);
+    }
+
+    return (await response.json()) as T;
   });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Graph request failed: ${response.status} ${text}`);
-  }
-
-  return (await response.json()) as T;
 }
 
 async function graphPostNoContent(
@@ -540,21 +640,23 @@ async function graphPostNoContent(
   url: string,
   body: unknown,
 ): Promise<void> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Prefer: 'outlook.timezone="UTC"',
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  await withGraphRetry(async () => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Graph request failed: ${response.status} ${text}`);
-  }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph request failed: ${response.status} ${text}`);
+    }
+  });
 }
 
 async function graphPatchNoContent(
@@ -562,37 +664,41 @@ async function graphPatchNoContent(
   url: string,
   body: unknown,
 ): Promise<void> {
-  const response = await fetch(url, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      Prefer: 'outlook.timezone="UTC"',
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  await withGraphRetry(async () => {
+    const response = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Graph request failed: ${response.status} ${text}`);
-  }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph request failed: ${response.status} ${text}`);
+    }
+  });
 }
 
 async function graphDeleteNoContent(token: string, url: string): Promise<void> {
-  const response = await fetch(url, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Prefer: 'outlook.timezone="UTC"',
-    },
-    cache: "no-store",
-  });
+  await withGraphRetry(async () => {
+    const response = await fetch(url, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Prefer: 'outlook.timezone="UTC"',
+      },
+      cache: "no-store",
+    });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Graph request failed: ${response.status} ${text}`);
-  }
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Graph request failed: ${response.status} ${text}`);
+    }
+  });
 }
 
 function toErrorMessage(error: unknown): string {
@@ -820,6 +926,7 @@ export async function isCourseFolderUnlockedForViewer(
     },
   );
   return directEntries.some((entry) => entry.email === email);
+
 }
 
 function canViewerAccessEvent(
@@ -950,7 +1057,9 @@ function isLikelyGraphPermissionError(error: unknown): boolean {
   return (
     message.includes("accessdenied") ||
     message.includes("forbidden") ||
-    message.includes("insufficient privileges")
+    message.includes("insufficient privileges") ||
+    message.includes("invalidrequest") ||
+    message.includes("is not valid for the requested drive")
   );
 }
 
@@ -1852,22 +1961,36 @@ export async function fetchMyFiles(
     }
   }
 
+  const rootUrl = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
+    ownerUserId,
+  )}/drive/root/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`;
+
+  let resolvedFolderId = normalizedFolderId;
   let nextUrl = normalizedFolderId
     ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
         ownerUserId,
       )}/drive/items/${encodeURIComponent(
         normalizedFolderId,
       )}/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`
-    : `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
-        ownerUserId,
-      )}/drive/root/children?$top=200&$select=id,name,webUrl,size,createdDateTime,lastModifiedDateTime,folder,file,parentReference,@microsoft.graph.downloadUrl`;
+    : rootUrl;
 
   let pageCount = 0;
   while (nextUrl && pageCount < 10) {
-    const page: GraphDriveChildrenResponse = await graphGet<GraphDriveChildrenResponse>(
-      token,
-      nextUrl,
-    );
+    let page: GraphDriveChildrenResponse;
+    try {
+      page = await graphGet<GraphDriveChildrenResponse>(token, nextUrl);
+    } catch (err) {
+      if (resolvedFolderId && isLikelyGraphPermissionError(err)) {
+        // The stored folder ID is from a different drive; fall back to root.
+        resolvedFolderId = null;
+        nextUrl = rootUrl;
+        pageCount = 0;
+        items.length = 0;
+        seenIds.clear();
+        continue;
+      }
+      throw err;
+    }
     for (const raw of page.value ?? []) {
       const mapped = mapDriveItemToMyFile(raw);
       if (!mapped || seenIds.has(mapped.id)) {
@@ -1882,14 +2005,14 @@ export async function fetchMyFiles(
 
   let currentFolderName = "My Files";
   let parentFolderId: string | null = null;
-  if (normalizedFolderId) {
+  if (resolvedFolderId) {
     try {
       const folderMeta = await graphGet<GraphDriveFolderMeta>(
         token,
         `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(
           ownerUserId,
         )}/drive/items/${encodeURIComponent(
-          normalizedFolderId,
+          resolvedFolderId,
         )}?$select=id,name,parentReference`,
       );
       currentFolderName = folderMeta.name?.trim() || "Folder";
@@ -1907,7 +2030,7 @@ export async function fetchMyFiles(
     return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
   });
 
-  if (!isPrivilegedRole(viewer?.role ?? null) && !normalizedFolderId) {
+  if (!isPrivilegedRole(viewer?.role ?? null) && !resolvedFolderId) {
     const folderIds = items
       .filter((item) => item.kind === "folder")
       .map((item) => item.id);
@@ -1919,7 +2042,7 @@ export async function fetchMyFiles(
     );
     const filtered = items.filter((item) => item.kind === "folder" && allowedIds.has(item.id));
     return {
-      currentFolderId: normalizedFolderId,
+      currentFolderId: resolvedFolderId,
       currentFolderName,
       parentFolderId,
       items: filtered,
@@ -1927,7 +2050,7 @@ export async function fetchMyFiles(
   }
 
   return {
-    currentFolderId: normalizedFolderId,
+    currentFolderId: resolvedFolderId,
     currentFolderName,
     parentFolderId,
     items,
